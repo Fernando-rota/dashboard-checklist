@@ -74,12 +74,10 @@ if uploaded_file_checklist is not None and uploaded_file_manut is not None:
     cruzado = cruzado.sort_values(by="Reincidencias", ascending=False)
     st.dataframe(cruzado[["PLACA", "MODELO", "MANUT. PROGRAMADA", "Reincidencias"]])
 
-    # Não Conformidades por Item (ordenado decrescente, sem fotos/observações, sem células vazias)
+    # Não Conformidades por Item (dados limpos, sem fotos/observações, decrescente)
     st.subheader("Não Conformidades por Item")
-    item_labels = {f"{i+1:02d}": col for i, col in enumerate(cols_itens)}
     df_nci = pd.DataFrame({
-        "Item": list(item_labels.keys()),
-        "Descrição": list(item_labels.values()),
+        "Item": cols_itens,
         "Não Conformidades": [
             df[col].astype(str).str.strip().str.lower().ne("ok").sum() for col in cols_itens
         ]
@@ -91,15 +89,13 @@ if uploaded_file_checklist is not None and uploaded_file_manut is not None:
         df_nci,
         x="Item",
         y="Não Conformidades",
-        hover_data=["Descrição"],
-        title="Quantidade de Não Conformidades por Item (Código)",
+        title="Não Conformidades por Item",
         color="Não Conformidades",
         color_continuous_scale="Reds"
     )
     st.plotly_chart(fig_nci, use_container_width=True)
 
-    with st.expander("Ver gabarito de Itens", expanded=False):
-        st.dataframe(df_nci.set_index("Item"))
+    st.dataframe(df_nci)
 
     # Fotos das Não Conformidades
     if "Anexe as fotos das não conformidades" in df.columns:
