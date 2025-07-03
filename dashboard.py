@@ -36,7 +36,9 @@ if uploaded_file_checklist is not None and uploaded_file_manut is not None:
     st.subheader("🚨 Reincidências por Veículo")
     cols_itens = [col for col in df.columns if col not in ["Carimbo de data/hora", "Pontuação", "Data", "Motorista", "Placa do Caminhão", "Km atual", "Anexe as fotos das não conformidades"]]
     df_reinc = df.copy()
-    df_reinc["Reincidencias"] = df_reinc[cols_itens].apply(lambda row: sum(v.strip().lower() != "ok" for v in row), axis=1)
+    df_reinc["Reincidencias"] = df_reinc[cols_itens].apply(
+        lambda row: sum(str(v).strip().lower() != "ok" for v in row), axis=1
+    )
     reincidencias_por_placa = df_reinc.groupby("Placa do Caminhão")["Reincidencias"].sum().reset_index()
     fig_reinc = px.bar(reincidencias_por_placa, x="Placa do Caminhão", y="Reincidencias", title="Quantidade de Não Conformidades por Veículo", color="Reincidencias")
     st.plotly_chart(fig_reinc, use_container_width=True)
@@ -53,7 +55,7 @@ if uploaded_file_checklist is not None and uploaded_file_manut is not None:
     item_labels = {f"{i+1:02d}": col for i, col in enumerate(cols_itens)}
     df_nci = pd.DataFrame({"Item": list(item_labels.keys()),
                            "Descrição": list(item_labels.values()),
-                           "Não Conformidades": [df[col].str.lower().ne("ok").sum() for col in cols_itens]})
+                           "Não Conformidades": [df[col].astype(str).str.strip().str.lower().ne("ok").sum() for col in cols_itens]})
     fig_nci = px.bar(df_nci, x="Item", y="Não Conformidades", hover_data=["Descrição"],
                      title="Quantidade de Não Conformidades por Item (Código)")
     st.plotly_chart(fig_nci, use_container_width=True)
