@@ -2,8 +2,8 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
-st.set_page_config(page_title="📋 Dashboard Checklist Veicular", layout="wide")
-st.title("📋 Dashboard Checklist Veicular — Filtros por Botões")
+st.set_page_config(page_title="Dashboard Checklist Veicular", layout="wide")
+st.title("Dashboard Checklist Veicular — Filtros por Botões")
 
 # Upload dos arquivos
 uploaded_file_checklist = st.file_uploader("Selecione o arquivo Excel do checklist:", type="xlsx")
@@ -31,7 +31,7 @@ if uploaded_file_checklist is not None and uploaded_file_manut is not None:
 
     st.markdown("---")
 
-    # 🚨 KPIs
+    # KPIs
     cols_itens = [col for col in df.columns if col not in [
         "Carimbo de data/hora", "Pontuação", "Data", "Motorista",
         "Placa do Caminhão", "Km atual", "Anexe as fotos das não conformidades"
@@ -55,31 +55,35 @@ if uploaded_file_checklist is not None and uploaded_file_manut is not None:
 
     st.markdown("---")
 
-    # 🚨 Reincidências por Veículo
+    # Reincidências por Veículo
     st.subheader("Reincidências por Veículo")
     fig_reinc = px.bar(
         reincidencias_por_placa,
         x="Placa do Caminhão",
         y="Reincidencias",
         title="Quantidade de Não Conformidades por Veículo",
-        color="Reincidencias"
+        color="Reincidencias",
+        color_continuous_scale="Reds"
     )
     st.plotly_chart(fig_reinc, use_container_width=True)
 
-    # 🔧 Indicador cruzado: Manutenção Programada x Reincidências
+    # Indicador cruzado aprimorado
     st.subheader("Indicador Cruzado: Manutenção Programada x Reincidências")
     cruzado = pd.merge(reincidencias_por_placa, manut, how="left", left_on="Placa do Caminhão", right_on="PLACA")
+    cruzado = cruzado.dropna(subset=["MANUT. PROGRAMADA"])
     fig_cruzado = px.scatter(
         cruzado,
         x="Reincidencias",
         y="MANUT. PROGRAMADA",
+        size="Reincidencias",
         color="MODELO",
-        hover_data=["PLACA"],
-        title="Reincidências vs. Manutenção Programada"
+        hover_data=["PLACA", "MANUT. PROGRAMADA"],
+        title="Relação entre Manutenção Programada e Reincidências",
+        labels={"MANUT. PROGRAMADA": "Próxima Manutenção"}
     )
     st.plotly_chart(fig_cruzado, use_container_width=True)
 
-    # 🚨 Não Conformidades por Item (com índice)
+    # Não Conformidades por Item (ordenado e sem fotos)
     st.subheader("Não Conformidades por Item")
     item_labels = {f"{i+1:02d}": col for i, col in enumerate(cols_itens)}
     df_nci = pd.DataFrame({
@@ -96,19 +100,23 @@ if uploaded_file_checklist is not None and uploaded_file_manut is not None:
         x="Item",
         y="Não Conformidades",
         hover_data=["Descrição"],
-        title="Quantidade de Não Conformidades por Item (Código)"
+        title="Quantidade de Não Conformidades por Item (Código)",
+        color="Não Conformidades",
+        color_continuous_scale="Reds"
     )
     st.plotly_chart(fig_nci, use_container_width=True)
 
     with st.expander("Ver gabarito de Itens", expanded=False):
         st.dataframe(df_nci.set_index("Item"))
 
-    # Fotos separadas (se houver)
+    # Fotos relacionadas com o item não conforme
     if "Anexe as fotos das não conformidades" in df.columns:
-        st.subheader("📷 Fotos das Não Conformidades")
-        fotos = df[["Placa do Caminhão", "Motorista", "Anexe as fotos das não conformidades"]].dropna()
+        st.subheader("Fotos das Não Conformidades")
+        fotos = df[["Placa do Caminhão", "Motorista", "Anexe as fotos das não conformidades"] + cols_itens].dropna(subset=["Anexe as fotos das não conformidades"])
         for _, row in fotos.iterrows():
-            st.markdown(f"**{row['Placa do Caminhão']} - {row['Motorista']}**")
-            st.image(row["Anexe as fotos das não conformidades"], use_column_width=True)
+            problemas = [col for col in cols_itens if str(row[col]).strip().lower() != "ok"]
+            if problemas:
+                st.markdown(f"**{row['Placa do Caminhão']} - {row['Motorista']}** - Problemas: {', '.join(problemas)}")
+                st.image(row["Anexe as fotos das não conformidades"], use_column_width=True)
 else:
-    st.info("📂 Por favor, envie os dois arquivos .xlsx para visualizar o dashboard.")
+    st.info("Por favor, envie os dois arquivos .xlsx para visualizar o dashboard.")
