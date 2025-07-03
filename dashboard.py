@@ -36,11 +36,6 @@ def severity_color(value, thresholds=(0.1, 0.3)):
     else:
         return "red"
 
-def colorize_severity(val):
-    cor = severity_color(val)
-    colors = {"green": "#2ecc71", "yellow": "#f1c40f", "red": "#e74c3c"}
-    return f'<span style="color:{colors[cor]}; font-weight:bold;">{val}</span>'
-
 def main():
     st.title("🚛 Dashboard Checklist Veicular")
 
@@ -104,29 +99,39 @@ def main():
     cols_excluir = checklist_required + ["Data", "Km atual"]
     cols_itens = [col for col in df.columns if col not in cols_excluir]
 
+    # --- Cálculo das Não Conformidades ---
     df_itens = df[cols_itens].astype(str).applymap(lambda x: x.strip().lower())
     df["Reincidencias"] = df_itens.apply(lambda row: sum(v != "ok" and v != "" for v in row), axis=1)
 
+    # Filtra por status NC
     if status_sel == "Aberto / Em andamento":
         df = df[df[col_status].str.lower().isin(["aberto", "em andamento"])]
     elif status_sel == "Concluído":
         df = df[df[col_status].str.lower() == "concluído"]
 
-    reincid_por_placa = df.groupby("Placa do Caminhão")["Reincidencias"].sum().reset_index()
-    total_itens = len(cols_itens)
-    reincid_por_placa["Índice de Severidade"] = (reincid_por_placa["Reincidencias"] / total_itens).round(3)
-
     total_nc = df["Reincidencias"].sum()
-    veiculo_top = reincid_por_placa.iloc[0]["Placa do Caminhão"] if not reincid_por_placa.empty else "N/A"
-    nc_top = reincid_por_placa.iloc[0]["Reincidencias"] if not reincid_por_placa.empty else 0
-    motorista_freq = df["Motorista"].value_counts().idxmax() if not df.empty else "N/A"
 
+    reincid_por_placa = df.groupby("Placa do Caminhão")["Reincidencias"].sum().reset_index()
+
+    if not reincid_por_placa.empty:
+        max_nc_idx = reincid_por_placa["Reincidencias"].idxmax()
+        veiculo_top = reincid_por_placa.loc[max_nc_idx, "Placa do Caminhão"]
+        nc_top = reincid_por_placa.loc[max_nc_idx, "Reincidencias"]
+    else:
+        veiculo_top = "N/A"
+        nc_top = 0
+
+    motorista_freq = df["Motorista"].value_counts()
+    motorista_top = motorista_freq.idxmax() if not motorista_freq.empty else "N/A"
+
+    # KPIs
     st.markdown("## KPIs Gerais")
     k1, k2, k3 = st.columns(3)
-    k1.metric("Total de Não Conformidades", total_nc)
-    k2.metric("Veículo com Mais Não Conformidades", veiculo_top, f"{nc_top} ocorrências")
-    k3.metric("Motorista com Mais Registros", motorista_freq)
+    k1.metric("Total de Não Conformidades", int(total_nc))
+    k2.metric("Veículo com Mais Não Conformidades", veiculo_top, f"{int(nc_top)} ocorrências")
+    k3.metric("Motorista com Mais Registros", motorista_top)
 
+    # Gráfico NC por veículo
     st.markdown("## Não Conformidades por Veículo")
     fig1 = px.bar(
         reincid_por_placa.sort_values("Reincidencias", ascending=True),
@@ -139,14 +144,25 @@ def main():
     )
     st.plotly_chart(fig1, use_container_width=True)
 
+    # Cruzamento Manutenção
     manut = manut.rename(columns=lambda x: x.strip())
     cruzado = pd.merge(reincid_por_placa, manut, how="left", left_on="Placa do Caminhão", right_on="PLACA")
     cruzado = cruzado.dropna(subset=["MANUT. PROGRAMADA"]).sort_values(by="Reincidencias", ascending=False)
-    cruzado_display = cruzado[["PLACA", "MODELO", "MANUT. PROGRAMADA", "Reincidencias", "Índice de Severidade"]].copy()
-    cruzado_display["Índice de Severidade"] = cruzado_display["Índice de Severidade"].apply(lambda v: f'<span style="color:#2ecc71;font-weight:bold;">{v}</span>' if v <= 0.1 else (f'<span style="color:#f1c40f;font-weight:bold;">{v}</span>' if v <= 0.3 else f'<span style="color:#e74c3c;font-weight:bold;">{v}</span>'))
+    cruzado_display = cruzado[["PLACA", "MODELO", "MANUT. PROGRAMADA", "Reincidencias"]].copy()
+
+    def colorize_severity(val):
+        if val <= 0.1:
+            return f'<span style="color:#2ecc71;font-weight:bold;">{val:.3f}</span>'
+        elif val <= 0.3:
+            return f'<span style="color:#f1c40f;font-weight:bold;">{val:.3f}</span>'
+        else:
+            return f'<span style="color:#e74c3c;font-weight:bold;">{val:.3f}</span>'
+
+    cruzado_display["Índice de Severidade"] = (cruzado["Reincidencias"] / len(cols_itens)).round(3).apply(colorize_severity)
     st.markdown("## Cruzamento Manutenção Programada x Não Conformidades")
     st.write(cruzado_display.to_html(escape=False), unsafe_allow_html=True)
 
+    # NC por Item
     st.markdown("## Não Conformidades por Item")
     df_nc_item = pd.DataFrame({
         "Item": cols_itens,
@@ -165,14 +181,15 @@ def main():
     ), use_container_width=True)
     st.dataframe(df_nc_item.reset_index(drop=True))
 
+    # Observações
     if col_obs in df.columns:
         obs = df[["Data", "Motorista", "Placa do Caminhão", col_obs, col_status]].dropna(subset=[col_obs])
         if not obs.empty:
             st.markdown("## Observações Registradas")
             st.dataframe(obs)
 
+    # Links das fotos
     st.markdown("## Links das Fotos das Não Conformidades por Veículo")
-
     if col_fotos in df.columns:
         fotos_df = df[["Data", "Motorista", "Placa do Caminhão", col_fotos, col_status]].dropna(subset=[col_fotos])
         if fotos_df.empty:
