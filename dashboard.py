@@ -41,6 +41,10 @@ if uploaded_file_checklist is not None and uploaded_file_manut is not None:
     reincidencias_por_placa = df_reinc.groupby("Placa do Caminhão")["Reincidencias"].sum().reset_index()
     reincidencias_por_placa = reincidencias_por_placa.sort_values(by="Reincidencias", ascending=False)
 
+    # Índice de Severidade: Média de reincidências por item
+    total_itens = len(cols_itens)
+    reincidencias_por_placa["Índice de Severidade"] = (reincidencias_por_placa["Reincidencias"] / total_itens).round(2)
+
     total_nc = df_reinc["Reincidencias"].sum()
     veiculo_top = reincidencias_por_placa.iloc[0]["Placa do Caminhão"]
     nc_top = reincidencias_por_placa.iloc[0]["Reincidencias"]
@@ -58,19 +62,21 @@ if uploaded_file_checklist is not None and uploaded_file_manut is not None:
     with aba2:
         fig_reinc = px.bar(
             reincidencias_por_placa,
-            x="Placa do Caminhão",
-            y="Reincidencias",
+            y="Placa do Caminhão",
+            x="Reincidencias",
             title="Quantidade de Não Conformidades por Veículo",
             color="Reincidencias",
-            color_continuous_scale="Reds"
+            color_continuous_scale=["green", "yellow", "red"],
+            orientation="h"
         )
         st.plotly_chart(fig_reinc, use_container_width=True)
+        st.dataframe(reincidencias_por_placa)
 
     with aba3:
         cruzado = pd.merge(reincidencias_por_placa, manut, how="left", left_on="Placa do Caminhão", right_on="PLACA")
         cruzado = cruzado.dropna(subset=["MANUT. PROGRAMADA"])
         cruzado = cruzado.sort_values(by="Reincidencias", ascending=False)
-        st.dataframe(cruzado[["PLACA", "MODELO", "MANUT. PROGRAMADA", "Reincidencias"]])
+        st.dataframe(cruzado[["PLACA", "MODELO", "MANUT. PROGRAMADA", "Reincidencias", "Índice de Severidade"]])
 
     with aba4:
         df_nci = pd.DataFrame({
@@ -81,17 +87,19 @@ if uploaded_file_checklist is not None and uploaded_file_manut is not None:
         })
         df_nci = df_nci[df_nci["Não Conformidades"] > 0]
         df_nci = df_nci.sort_values(by="Não Conformidades", ascending=False)
+        df_nci["% do Total"] = ((df_nci["Não Conformidades"] / df_nci["Não Conformidades"].sum()) * 100).round(1)
 
         fig_nci = px.bar(
             df_nci,
-            x="Item",
-            y="Não Conformidades",
+            y="Item",
+            x="Não Conformidades",
             title="Não Conformidades por Item",
             color="Não Conformidades",
-            color_continuous_scale="Reds"
+            color_continuous_scale=["green", "yellow", "red"],
+            orientation="h"
         )
         st.plotly_chart(fig_nci, use_container_width=True)
-        st.dataframe(df_nci)
+        st.dataframe(df_nci.dropna().reset_index(drop=True))
 
     with aba5:
         # Observações
@@ -108,6 +116,6 @@ if uploaded_file_checklist is not None and uploaded_file_manut is not None:
                 st.subheader("Fotos das Não Conformidades")
                 for _, row in fotos.iterrows():
                     st.markdown(f"**{row['Data']} - {row['Placa do Caminhão']} - {row['Motorista']}**")
-                    st.image(row["Anexe as fotos das não conformidades"], use_column_width=True)
+                    st.markdown(f"[Ver foto]({row['Anexe as fotos das não conformidades']})")
 else:
     st.info("Por favor, envie os dois arquivos .xlsx para visualizar o dashboard.")
