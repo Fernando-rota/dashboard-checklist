@@ -47,7 +47,7 @@ if uploaded_file_checklist is not None and uploaded_file_manut is not None:
     motorista_freq = df["Motorista"].value_counts().idxmax()
 
     # Abas
-    aba1, aba2, aba3, aba4 = st.tabs(["KPIs", "Reincidências", "Manutenção x Reincidência", "Não Conformidades por Item"])
+    aba1, aba2, aba3, aba4, aba5 = st.tabs(["KPIs", "Reincidências", "Manutenção x Reincidência", "Não Conformidades por Item", "Observações e Fotos"])
 
     with aba1:
         kpi1, kpi2, kpi3 = st.columns(3)
@@ -93,14 +93,21 @@ if uploaded_file_checklist is not None and uploaded_file_manut is not None:
         st.plotly_chart(fig_nci, use_container_width=True)
         st.dataframe(df_nci)
 
+    with aba5:
+        # Observações
+        if "Observações" in df.columns:
+            obs = df[["Data", "Motorista", "Placa do Caminhão", "Observações"]].dropna(subset=["Observações"])
+            if not obs.empty:
+                st.subheader("Observações")
+                st.dataframe(obs)
+
         # Fotos separadas
         if "Anexe as fotos das não conformidades" in df.columns:
-            fotos = df[["Placa do Caminhão", "Motorista", "Anexe as fotos das não conformidades"]].dropna(subset=["Anexe as fotos das não conformidades"])
+            fotos = df[["Data", "Motorista", "Placa do Caminhão", "Anexe as fotos das não conformidades"]].dropna(subset=["Anexe as fotos das não conformidades"])
             if not fotos.empty:
-                st.markdown("---")
                 st.subheader("Fotos das Não Conformidades")
                 for _, row in fotos.iterrows():
-                    st.markdown(f"**{row['Placa do Caminhão']} - {row['Motorista']}**")
+                    st.markdown(f"**{row['Data']} - {row['Placa do Caminhão']} - {row['Motorista']}**")
                     st.image(row["Anexe as fotos das não conformidades"], use_column_width=True)
 else:
     st.info("Por favor, envie os dois arquivos .xlsx para visualizar o dashboard.")
