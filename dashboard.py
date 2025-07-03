@@ -3,7 +3,6 @@ import pandas as pd
 import plotly.express as px
 
 st.set_page_config(page_title="Dashboard Checklist Veicular", layout="wide")
-st.title("Dashboard Checklist Veicular — Filtros por Botões")
 
 # Upload dos arquivos
 uploaded_file_checklist = st.file_uploader("Selecione o arquivo Excel do checklist:", type="xlsx")
@@ -29,13 +28,12 @@ if uploaded_file_checklist is not None and uploaded_file_manut is not None:
     if placa_sel != "Todas":
         df = df[df["Placa do Caminhão"] == placa_sel]
 
-    st.markdown("---")
-
-    # KPIs
     cols_itens = [col for col in df.columns if col not in [
         "Carimbo de data/hora", "Pontuação", "Data", "Motorista",
-        "Placa do Caminhão", "Km atual", "Anexe as fotos das não conformidades"
+        "Placa do Caminhão", "Km atual",
+        "Anexe as fotos das não conformidades", "Observações"
     ]]
+
     df_reinc = df.copy()
     df_reinc[cols_itens] = df_reinc[cols_itens].astype(str)
     df_reinc["Reincidencias"] = df_reinc[cols_itens].apply(lambda row: sum(v.strip().lower() != "ok" for v in row), axis=1)
@@ -48,61 +46,61 @@ if uploaded_file_checklist is not None and uploaded_file_manut is not None:
     nc_top = reincidencias_por_placa.iloc[0]["Reincidencias"]
     motorista_freq = df["Motorista"].value_counts().idxmax()
 
-    kpi1, kpi2, kpi3 = st.columns(3)
-    kpi1.metric("Total de Não Conformidades", total_nc)
-    kpi2.metric("Veículo com Mais Reincidências", veiculo_top, f"{nc_top} ocorrências")
-    kpi3.metric("Motorista com Mais Registros", motorista_freq)
+    # Abas
+    aba1, aba2, aba3, aba4 = st.tabs(["KPIs", "Reincidências", "Manutenção x Reincidência", "Não Conformidades por Item"])
 
-    st.markdown("---")
+    with aba1:
+        kpi1, kpi2, kpi3 = st.columns(3)
+        kpi1.metric("Total de Não Conformidades", total_nc)
+        kpi2.metric("Veículo com Mais Reincidências", veiculo_top, f"{nc_top} ocorrências")
+        kpi3.metric("Motorista com Mais Registros", motorista_freq)
 
-    # Reincidências por Veículo
-    st.subheader("Reincidências por Veículo")
-    fig_reinc = px.bar(
-        reincidencias_por_placa,
-        x="Placa do Caminhão",
-        y="Reincidencias",
-        title="Quantidade de Não Conformidades por Veículo",
-        color="Reincidencias",
-        color_continuous_scale="Reds"
-    )
-    st.plotly_chart(fig_reinc, use_container_width=True)
+    with aba2:
+        fig_reinc = px.bar(
+            reincidencias_por_placa,
+            x="Placa do Caminhão",
+            y="Reincidencias",
+            title="Quantidade de Não Conformidades por Veículo",
+            color="Reincidencias",
+            color_continuous_scale="Reds"
+        )
+        st.plotly_chart(fig_reinc, use_container_width=True)
 
-    # Indicador cruzado em formato de lista
-    st.subheader("Indicador Cruzado: Manutenção Programada x Reincidências")
-    cruzado = pd.merge(reincidencias_por_placa, manut, how="left", left_on="Placa do Caminhão", right_on="PLACA")
-    cruzado = cruzado.dropna(subset=["MANUT. PROGRAMADA"])
-    cruzado = cruzado.sort_values(by="Reincidencias", ascending=False)
-    st.dataframe(cruzado[["PLACA", "MODELO", "MANUT. PROGRAMADA", "Reincidencias"]])
+    with aba3:
+        cruzado = pd.merge(reincidencias_por_placa, manut, how="left", left_on="Placa do Caminhão", right_on="PLACA")
+        cruzado = cruzado.dropna(subset=["MANUT. PROGRAMADA"])
+        cruzado = cruzado.sort_values(by="Reincidencias", ascending=False)
+        st.dataframe(cruzado[["PLACA", "MODELO", "MANUT. PROGRAMADA", "Reincidencias"]])
 
-    # Não Conformidades por Item (dados limpos, sem fotos/observações, decrescente)
-    st.subheader("Não Conformidades por Item")
-    df_nci = pd.DataFrame({
-        "Item": cols_itens,
-        "Não Conformidades": [
-            df[col].astype(str).str.strip().str.lower().ne("ok").sum() for col in cols_itens
-        ]
-    })
-    df_nci = df_nci[df_nci["Não Conformidades"] > 0]
-    df_nci = df_nci.sort_values(by="Não Conformidades", ascending=False)
+    with aba4:
+        df_nci = pd.DataFrame({
+            "Item": cols_itens,
+            "Não Conformidades": [
+                df[col].astype(str).str.strip().str.lower().ne("ok").sum() for col in cols_itens
+            ]
+        })
+        df_nci = df_nci[df_nci["Não Conformidades"] > 0]
+        df_nci = df_nci.sort_values(by="Não Conformidades", ascending=False)
 
-    fig_nci = px.bar(
-        df_nci,
-        x="Item",
-        y="Não Conformidades",
-        title="Não Conformidades por Item",
-        color="Não Conformidades",
-        color_continuous_scale="Reds"
-    )
-    st.plotly_chart(fig_nci, use_container_width=True)
+        fig_nci = px.bar(
+            df_nci,
+            x="Item",
+            y="Não Conformidades",
+            title="Não Conformidades por Item",
+            color="Não Conformidades",
+            color_continuous_scale="Reds"
+        )
+        st.plotly_chart(fig_nci, use_container_width=True)
+        st.dataframe(df_nci)
 
-    st.dataframe(df_nci)
-
-    # Fotos das Não Conformidades
-    if "Anexe as fotos das não conformidades" in df.columns:
-        st.subheader("Fotos das Não Conformidades")
-        fotos = df[["Placa do Caminhão", "Motorista", "Anexe as fotos das não conformidades"]].dropna(subset=["Anexe as fotos das não conformidades"])
-        for _, row in fotos.iterrows():
-            st.markdown(f"**{row['Placa do Caminhão']} - {row['Motorista']}**")
-            st.image(row["Anexe as fotos das não conformidades"], use_column_width=True)
+        # Fotos separadas
+        if "Anexe as fotos das não conformidades" in df.columns:
+            fotos = df[["Placa do Caminhão", "Motorista", "Anexe as fotos das não conformidades"]].dropna(subset=["Anexe as fotos das não conformidades"])
+            if not fotos.empty:
+                st.markdown("---")
+                st.subheader("Fotos das Não Conformidades")
+                for _, row in fotos.iterrows():
+                    st.markdown(f"**{row['Placa do Caminhão']} - {row['Motorista']}**")
+                    st.image(row["Anexe as fotos das não conformidades"], use_column_width=True)
 else:
     st.info("Por favor, envie os dois arquivos .xlsx para visualizar o dashboard.")
