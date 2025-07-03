@@ -122,14 +122,19 @@ def main():
         nc_top = 0
 
     motorista_freq = df["Motorista"].value_counts()
-    motorista_top = motorista_freq.idxmax() if not motorista_freq.empty else "N/A"
+    if not motorista_freq.empty:
+        max_registros = motorista_freq.max()
+        motoristas_top = motorista_freq[motorista_freq == max_registros].index.tolist()
+        motorista_top_str = ", ".join(motoristas_top)
+    else:
+        motorista_top_str = "N/A"
 
     # KPIs
     st.markdown("## KPIs Gerais")
     k1, k2, k3 = st.columns(3)
     k1.metric("Total de Não Conformidades", int(total_nc))
     k2.metric("Veículo com Mais Não Conformidades", veiculo_top, f"{int(nc_top)} ocorrências")
-    k3.metric("Motorista com Mais Registros", motorista_top)
+    k3.metric("Motorista(s) com Mais Registros", motorista_top_str)
 
     # Gráfico NC por veículo
     st.markdown("## Não Conformidades por Veículo")
