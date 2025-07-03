@@ -1,17 +1,8 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import re
 
 st.set_page_config(page_title="Dashboard Checklist Veicular", layout="wide")
-
-def get_drive_direct_link(url):
-    """Extrai link direto de visualização do Google Drive."""
-    match = re.search(r'/d/([a-zA-Z0-9_-]+)', url)
-    if match:
-        file_id = match.group(1)
-        return f"https://drive.google.com/uc?export=view&id={file_id}"
-    return url
 
 # Upload dos arquivos
 uploaded_file_checklist = st.file_uploader("Selecione o arquivo Excel do checklist:", type="xlsx")
@@ -23,7 +14,7 @@ if uploaded_file_checklist is not None and uploaded_file_manut is not None:
     manut = pd.read_excel(uploaded_file_manut)
     manut.columns = manut.columns.str.strip()
 
-    # Filtros
+    # Filtros por botão
     col1, col2 = st.columns(2)
     with col1:
         motoristas = sorted(df["Motorista"].dropna().unique())
@@ -37,27 +28,24 @@ if uploaded_file_checklist is not None and uploaded_file_manut is not None:
     if placa_sel != "Todas":
         df = df[df["Placa do Caminhão"] == placa_sel]
 
-    # Itens de verificação
-    cols_itens = [col for col in df.columns if col not in [
-        "Carimbo de data/hora", "Pontuação", "Data", "Motorista",
-        "Placa do Caminhão", "Km atual",
-        "Anexe as fotos das não conformidades", "Observações"
-    ]]
+    # Remover colunas indesejadas de forma robusta
+    colunas_excluir_lower = ["anexe as fotos das não conformidades", "observações"]
+    cols_itens = [
+        col for col in df.columns
+        if col.strip().lower() not in colunas_excluir_lower
+        and col not in ["Carimbo de data/hora", "Pontuação", "Data", "Motorista", "Placa do Caminhão", "Km atual"]
+    ]
 
     df_reinc = df.copy()
     df_reinc[cols_itens] = df_reinc[cols_itens].astype(str)
-    df_reinc["Reincidencias"] = df_reinc[cols_itens].apply(
-        lambda row: sum(v.strip().lower() != "ok" for v in row), axis=1
-    )
+    df_reinc["Reincidencias"] = df_reinc[cols_itens].apply(lambda row: sum(v.strip().lower() != "ok" for v in row), axis=1)
 
-    # Reincidências por veículo
     reincidencias_por_placa = df_reinc.groupby("Placa do Caminhão")["Reincidencias"].sum().reset_index()
     reincidencias_por_placa = reincidencias_por_placa.sort_values(by="Reincidencias", ascending=False)
 
+    # Índice de Severidade
     total_itens = len(cols_itens)
-    reincidencias_por_placa["Índice de Severidade"] = (
-        reincidencias_por_placa["Reincidencias"] / total_itens
-    ).round(2)
+    reincidencias_por_placa["Índice de Severidade"] = (reincidencias_por_placa["Reincidencias"] / total_itens).round(2)
 
     total_nc = df_reinc["Reincidencias"].sum()
     veiculo_top = reincidencias_por_placa.iloc[0]["Placa do Caminhão"]
@@ -65,10 +53,7 @@ if uploaded_file_checklist is not None and uploaded_file_manut is not None:
     motorista_freq = df["Motorista"].value_counts().idxmax()
 
     # Abas
-    aba1, aba2, aba3, aba4, aba5 = st.tabs([
-        "KPIs", "Reincidências", "Manutenção x Reincidência",
-        "Não Conformidades por Item", "Observações e Fotos"
-    ])
+    aba1, aba2, aba3, aba4, aba5 = st.tabs(["KPIs", "Reincidências", "Manutenção x Reincidência", "Não Conformidades por Item", "Observações e Fotos"])
 
     with aba1:
         kpi1, kpi2, kpi3 = st.columns(3)
@@ -90,10 +75,7 @@ if uploaded_file_checklist is not None and uploaded_file_manut is not None:
         st.dataframe(reincidencias_por_placa)
 
     with aba3:
-        cruzado = pd.merge(
-            reincidencias_por_placa, manut,
-            how="left", left_on="Placa do Caminhão", right_on="PLACA"
-        )
+        cruzado = pd.merge(reincidencias_por_placa, manut, how="left", left_on="Placa do Caminhão", right_on="PLACA")
         cruzado = cruzado.dropna(subset=["MANUT. PROGRAMADA"])
         cruzado = cruzado.sort_values(by="Reincidencias", ascending=False)
         st.dataframe(cruzado[["PLACA", "MODELO", "MANUT. PROGRAMADA", "Reincidencias", "Índice de Severidade"]])
@@ -119,8 +101,7 @@ if uploaded_file_checklist is not None and uploaded_file_manut is not None:
             orientation="h"
         )
         st.plotly_chart(fig_nci, use_container_width=True)
-        # ✅ Exibe apenas as colunas necessárias
-        st.dataframe(df_nci[["Item", "Não Conformidades", "% do Total"]].reset_index(drop=True))
+        st.dataframe(df_nci.reset_index(drop=True))
 
     with aba5:
         if "Observações" in df.columns:
@@ -130,12 +111,12 @@ if uploaded_file_checklist is not None and uploaded_file_manut is not None:
                 st.dataframe(obs)
 
         if "Anexe as fotos das não conformidades" in df.columns:
-            fotos = df[["Data", "Motorista", "Placa do Caminhão", "Anexe as fotos das não conformidades"]].dropna()
+            fotos = df[["Data", "Motorista", "Placa do Caminhão", "Anexe as fotos das não conformidades"]].dropna(subset=["Anexe as fotos das não conformidades"])
             if not fotos.empty:
                 st.subheader("Fotos das Não Conformidades")
                 for _, row in fotos.iterrows():
                     st.markdown(f"**{row['Data']} - {row['Placa do Caminhão']} - {row['Motorista']}**")
-                    st.markdown(f"[Ver foto]({get_drive_direct_link(row['Anexe as fotos das não conformidades'])})")
+                    st.markdown(f"[Ver foto]({row['Anexe as fotos das não conformidades']})")
 
 else:
     st.info("Por favor, envie os dois arquivos .xlsx para visualizar o dashboard.")
