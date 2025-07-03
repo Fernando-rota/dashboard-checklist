@@ -67,23 +67,14 @@ if uploaded_file_checklist is not None and uploaded_file_manut is not None:
     )
     st.plotly_chart(fig_reinc, use_container_width=True)
 
-    # Indicador cruzado aprimorado
+    # Indicador cruzado em formato de lista
     st.subheader("Indicador Cruzado: Manutenção Programada x Reincidências")
     cruzado = pd.merge(reincidencias_por_placa, manut, how="left", left_on="Placa do Caminhão", right_on="PLACA")
     cruzado = cruzado.dropna(subset=["MANUT. PROGRAMADA"])
-    fig_cruzado = px.scatter(
-        cruzado,
-        x="Reincidencias",
-        y="MANUT. PROGRAMADA",
-        size="Reincidencias",
-        color="MODELO",
-        hover_data=["PLACA", "MANUT. PROGRAMADA"],
-        title="Relação entre Manutenção Programada e Reincidências",
-        labels={"MANUT. PROGRAMADA": "Próxima Manutenção"}
-    )
-    st.plotly_chart(fig_cruzado, use_container_width=True)
+    cruzado = cruzado.sort_values(by="Reincidencias", ascending=False)
+    st.dataframe(cruzado[["PLACA", "MODELO", "MANUT. PROGRAMADA", "Reincidencias"]])
 
-    # Não Conformidades por Item (ordenado e sem fotos)
+    # Não Conformidades por Item (ordenado decrescente, sem fotos/observações, sem células vazias)
     st.subheader("Não Conformidades por Item")
     item_labels = {f"{i+1:02d}": col for i, col in enumerate(cols_itens)}
     df_nci = pd.DataFrame({
@@ -93,6 +84,7 @@ if uploaded_file_checklist is not None and uploaded_file_manut is not None:
             df[col].astype(str).str.strip().str.lower().ne("ok").sum() for col in cols_itens
         ]
     })
+    df_nci = df_nci[df_nci["Não Conformidades"] > 0]
     df_nci = df_nci.sort_values(by="Não Conformidades", ascending=False)
 
     fig_nci = px.bar(
@@ -109,14 +101,12 @@ if uploaded_file_checklist is not None and uploaded_file_manut is not None:
     with st.expander("Ver gabarito de Itens", expanded=False):
         st.dataframe(df_nci.set_index("Item"))
 
-    # Fotos relacionadas com o item não conforme
+    # Fotos das Não Conformidades
     if "Anexe as fotos das não conformidades" in df.columns:
         st.subheader("Fotos das Não Conformidades")
-        fotos = df[["Placa do Caminhão", "Motorista", "Anexe as fotos das não conformidades"] + cols_itens].dropna(subset=["Anexe as fotos das não conformidades"])
+        fotos = df[["Placa do Caminhão", "Motorista", "Anexe as fotos das não conformidades"]].dropna(subset=["Anexe as fotos das não conformidades"])
         for _, row in fotos.iterrows():
-            problemas = [col for col in cols_itens if str(row[col]).strip().lower() != "ok"]
-            if problemas:
-                st.markdown(f"**{row['Placa do Caminhão']} - {row['Motorista']}** - Problemas: {', '.join(problemas)}")
-                st.image(row["Anexe as fotos das não conformidades"], use_column_width=True)
+            st.markdown(f"**{row['Placa do Caminhão']} - {row['Motorista']}**")
+            st.image(row["Anexe as fotos das não conformidades"], use_column_width=True)
 else:
     st.info("Por favor, envie os dois arquivos .xlsx para visualizar o dashboard.")
