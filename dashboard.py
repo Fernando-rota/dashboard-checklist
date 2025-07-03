@@ -6,22 +6,14 @@ import re
 st.set_page_config(page_title="Dashboard Checklist Veicular", layout="wide")
 
 def get_drive_direct_link(url):
-    """Extrai link direto para visualização de imagem no Google Drive."""
+    """Extrai link direto de visualização do Google Drive."""
     match = re.search(r'/d/([a-zA-Z0-9_-]+)', url)
     if match:
         file_id = match.group(1)
         return f"https://drive.google.com/uc?export=view&id={file_id}"
     return url
 
-def severity_color(value, thresholds=(0.1, 0.3)):
-    """Define cor baseada em índice de severidade."""
-    if value <= thresholds[0]:
-        return "green"
-    elif value <= thresholds[1]:
-        return "yellow"
-    else:
-        return "red"
-
+# Upload dos arquivos
 uploaded_file_checklist = st.file_uploader("Selecione o arquivo Excel do checklist:", type="xlsx")
 uploaded_file_manut = st.file_uploader("Selecione o arquivo Excel MANU. PREVENT:", type="xlsx")
 
@@ -31,7 +23,7 @@ if uploaded_file_checklist is not None and uploaded_file_manut is not None:
     manut = pd.read_excel(uploaded_file_manut)
     manut.columns = manut.columns.str.strip()
 
-    # Filtros por botão
+    # Filtros
     col1, col2 = st.columns(2)
     with col1:
         motoristas = sorted(df["Motorista"].dropna().unique())
@@ -45,6 +37,7 @@ if uploaded_file_checklist is not None and uploaded_file_manut is not None:
     if placa_sel != "Todas":
         df = df[df["Placa do Caminhão"] == placa_sel]
 
+    # Itens de verificação
     cols_itens = [col for col in df.columns if col not in [
         "Carimbo de data/hora", "Pontuação", "Data", "Motorista",
         "Placa do Caminhão", "Km atual",
@@ -53,21 +46,29 @@ if uploaded_file_checklist is not None and uploaded_file_manut is not None:
 
     df_reinc = df.copy()
     df_reinc[cols_itens] = df_reinc[cols_itens].astype(str)
-    df_reinc["Reincidencias"] = df_reinc[cols_itens].apply(lambda row: sum(v.strip().lower() != "ok" for v in row), axis=1)
+    df_reinc["Reincidencias"] = df_reinc[cols_itens].apply(
+        lambda row: sum(v.strip().lower() != "ok" for v in row), axis=1
+    )
 
+    # Reincidências por veículo
     reincidencias_por_placa = df_reinc.groupby("Placa do Caminhão")["Reincidencias"].sum().reset_index()
     reincidencias_por_placa = reincidencias_por_placa.sort_values(by="Reincidencias", ascending=False)
 
     total_itens = len(cols_itens)
-    reincidencias_por_placa["Índice de Severidade"] = (reincidencias_por_placa["Reincidencias"] / total_itens).round(2)
-    reincidencias_por_placa["Cor Severidade"] = reincidencias_por_placa["Índice de Severidade"].apply(severity_color)
+    reincidencias_por_placa["Índice de Severidade"] = (
+        reincidencias_por_placa["Reincidencias"] / total_itens
+    ).round(2)
 
     total_nc = df_reinc["Reincidencias"].sum()
-    veiculo_top = reincidencias_por_placa.iloc[0]["Placa do Caminhão"] if not reincidencias_por_placa.empty else "N/A"
-    nc_top = reincidencias_por_placa.iloc[0]["Reincidencias"] if not reincidencias_por_placa.empty else 0
-    motorista_freq = df["Motorista"].value_counts().idxmax() if not df.empty else "N/A"
+    veiculo_top = reincidencias_por_placa.iloc[0]["Placa do Caminhão"]
+    nc_top = reincidencias_por_placa.iloc[0]["Reincidencias"]
+    motorista_freq = df["Motorista"].value_counts().idxmax()
 
-    aba1, aba2, aba3, aba4, aba5 = st.tabs(["KPIs", "Reincidências", "Manutenção x Reincidência", "Não Conformidades por Item", "Observações e Fotos"])
+    # Abas
+    aba1, aba2, aba3, aba4, aba5 = st.tabs([
+        "KPIs", "Reincidências", "Manutenção x Reincidência",
+        "Não Conformidades por Item", "Observações e Fotos"
+    ])
 
     with aba1:
         kpi1, kpi2, kpi3 = st.columns(3)
@@ -86,21 +87,16 @@ if uploaded_file_checklist is not None and uploaded_file_manut is not None:
             orientation="h"
         )
         st.plotly_chart(fig_reinc, use_container_width=True)
-        st.dataframe(reincidencias_por_placa.drop(columns=["Cor Severidade"]))
+        st.dataframe(reincidencias_por_placa)
 
     with aba3:
-        cruzado = pd.merge(reincidencias_por_placa, manut, how="left", left_on="Placa do Caminhão", right_on="PLACA")
+        cruzado = pd.merge(
+            reincidencias_por_placa, manut,
+            how="left", left_on="Placa do Caminhão", right_on="PLACA"
+        )
         cruzado = cruzado.dropna(subset=["MANUT. PROGRAMADA"])
         cruzado = cruzado.sort_values(by="Reincidencias", ascending=False)
-        # Aplicar cor para coluna Severidade usando markdown colorido
-        def colored_severity(val):
-            cor = severity_color(val)
-            color_map = {"green": "#2ecc71", "yellow": "#f1c40f", "red": "#e74c3c"}
-            return f'<span style="color:{color_map[cor]}; font-weight:bold;">{val}</span>'
-        cruzado_display = cruzado[["PLACA", "MODELO", "MANUT. PROGRAMADA", "Reincidencias", "Índice de Severidade"]].copy()
-        cruzado_display["Índice de Severidade"] = cruzado_display["Índice de Severidade"].apply(colored_severity)
-        st.write("### Manutenção Programada x Reincidências")
-        st.write(cruzado_display.to_html(escape=False), unsafe_allow_html=True)
+        st.dataframe(cruzado[["PLACA", "MODELO", "MANUT. PROGRAMADA", "Reincidencias", "Índice de Severidade"]])
 
     with aba4:
         df_nci = pd.DataFrame({
@@ -123,29 +119,23 @@ if uploaded_file_checklist is not None and uploaded_file_manut is not None:
             orientation="h"
         )
         st.plotly_chart(fig_nci, use_container_width=True)
-        st.dataframe(df_nci.reset_index(drop=True))
+        # ✅ Exibe apenas as colunas necessárias
+        st.dataframe(df_nci[["Item", "Não Conformidades", "% do Total"]].reset_index(drop=True))
 
     with aba5:
-        # Observações
         if "Observações" in df.columns:
             obs = df[["Data", "Motorista", "Placa do Caminhão", "Observações"]].dropna(subset=["Observações"])
             if not obs.empty:
                 st.subheader("Observações")
                 st.dataframe(obs)
 
-        # Fotos
         if "Anexe as fotos das não conformidades" in df.columns:
-            fotos = df[["Data", "Motorista", "Placa do Caminhão", "Anexe as fotos das não conformidades"]].dropna(subset=["Anexe as fotos das não conformidades"])
+            fotos = df[["Data", "Motorista", "Placa do Caminhão", "Anexe as fotos das não conformidades"]].dropna()
             if not fotos.empty:
                 st.subheader("Fotos das Não Conformidades")
                 for _, row in fotos.iterrows():
                     st.markdown(f"**{row['Data']} - {row['Placa do Caminhão']} - {row['Motorista']}**")
-                    direct_link = get_drive_direct_link(row['Anexe as fotos das não conformidades'])
-                    # Tenta mostrar imagem direta, se der erro o usuário verá o link
-                    try:
-                        st.image(direct_link, width=400)
-                    except:
-                        st.markdown(f"[Ver foto]({direct_link})")
+                    st.markdown(f"[Ver foto]({get_drive_direct_link(row['Anexe as fotos das não conformidades'])})")
 
 else:
     st.info("Por favor, envie os dois arquivos .xlsx para visualizar o dashboard.")
