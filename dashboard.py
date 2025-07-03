@@ -2,85 +2,64 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
-st.set_page_config(page_title="📋 Checklist Veicular", layout="wide")
-st.markdown("# 📋 Dashboard Checklist Veicular — Filtros por Botões")
+st.set_page_config(page_title="📋 Dashboard Checklist Veicular", layout="wide")
+st.title("📋 Dashboard Checklist Veicular — Filtros por Botões")
 
-# === Upload dos Arquivos ===
-checklist_file = st.file_uploader("Selecione o arquivo Excel do checklist:", type="xlsx")
-manut_file = st.file_uploader("Selecione o arquivo Excel MANU.PREVENT:", type="xlsx")
+# Upload dos arquivos
+uploaded_file_checklist = st.file_uploader("Selecione o arquivo Excel do checklist:", type="xlsx")
+uploaded_file_manut = st.file_uploader("Selecione o arquivo Excel MANU. PREVENT:", type="xlsx")
 
-if checklist_file and manut_file:
-    # === Carregar os dados ===
-    df = pd.read_excel(checklist_file)
-    manu = pd.read_excel(manut_file)
+if uploaded_file_checklist is not None and uploaded_file_manut is not None:
+    df = pd.read_excel(uploaded_file_checklist)
+    df.columns = df.columns.str.strip()  # remove espacos em branco nos nomes das colunas
+    manut = pd.read_excel(uploaded_file_manut)
+    manut.columns = manut.columns.str.strip()
 
-    # === Renomear colunas longas para índices ===
-    colunas_problemas = df.columns[6:-1].tolist()
-    col_map = {col: f"Item {i+1}" for i, col in enumerate(colunas_problemas)}
-    df.rename(columns=col_map, inplace=True)
-
-    # === Criar coluna de não conformidades por linha ===
-    itens_nao_conformes = list(col_map.values())
-    df["Qtd_Não_Conforme"] = df[itens_nao_conformes].apply(lambda x: (x == "Não Conforme").sum(), axis=1)
-
-    # === Sidebar com filtros ===
-    st.sidebar.markdown("## 🚦 Filtrar por Motorista")
-    motoristas = sorted(df["Motorista"].dropna().unique())
-    motorista_selecionado = st.sidebar.multiselect("Motoristas:", motoristas, default=motoristas)
-
-    st.sidebar.markdown("## 🚦 Filtrar por Placa")
-    placas = sorted(df["Placa do Caminhão"].dropna().unique())
-    placa_selecionada = st.sidebar.multiselect("Placas:", placas, default=placas)
-
-    # === Aplicar Filtros ===
-    df_filtrado = df[df["Motorista"].isin(motorista_selecionado) & df["Placa do Caminhão"].isin(placa_selecionado)]
-
-    # === KPIs ===
+    # Filtros por botão
     col1, col2 = st.columns(2)
-    col1.metric("📄 Total de Checklists", len(df_filtrado))
-    col2.metric("❌ Total de Não Conformidades", int(df_filtrado["Qtd_Não_Conforme"].sum()))
+    with col1:
+        motoristas = sorted(df["Motorista"].dropna().unique())
+        motorista_sel = st.radio("\U0001F6A6 Filtrar por Motorista", options=["Todos"] + motoristas, horizontal=True)
+    with col2:
+        placas = sorted(df["Placa do Caminhão"].dropna().unique())
+        placa_sel = st.radio("\U0001F6A6 Filtrar por Placa", options=["Todas"] + placas, horizontal=True)
 
-    # === Gráfico de reincidências por placa ===
-    st.markdown("## 🚨 Reincidências por Veículo")
-    reinc = df_filtrado[itens_nao_conformes + ["Placa do Caminhão"]].copy()
-    reinc = reinc.melt(id_vars=["Placa do Caminhão"], value_vars=itens_nao_conformes)
-    reinc = reinc[reinc["value"] == "Não Conforme"]
-    reincidencias = reinc.groupby("Placa do Caminhão").size().reset_index(name="Reincidências")
+    # Aplicação dos filtros
+    if motorista_sel != "Todos":
+        df = df[df["Motorista"] == motorista_sel]
+    if placa_sel != "Todas":
+        df = df[df["Placa do Caminhão"] == placa_sel]
 
-    fig_reinc = px.bar(reincidencias, x="Placa do Caminhão", y="Reincidências", text="Reincidências",
-                       color_discrete_sequence=["indianred"])
-    fig_reinc.update_traces(textposition="outside")
-    fig_reinc.update_layout(xaxis_title="Placa", yaxis_title="Nº de Não Conformidades")
+    st.markdown("---")
+
+    # 🚨 Reincidências por Veículo
+    st.subheader("🚨 Reincidências por Veículo")
+    cols_itens = [col for col in df.columns if col not in ["Carimbo de data/hora", "Pontuação", "Data", "Motorista", "Placa do Caminhão", "Km atual", "Anexe as fotos das não conformidades"]]
+    df_reinc = df.copy()
+    df_reinc["Reincidencias"] = df_reinc[cols_itens].apply(lambda row: sum(v.strip().lower() != "ok" for v in row), axis=1)
+    reincidencias_por_placa = df_reinc.groupby("Placa do Caminhão")["Reincidencias"].sum().reset_index()
+    fig_reinc = px.bar(reincidencias_por_placa, x="Placa do Caminhão", y="Reincidencias", title="Quantidade de Não Conformidades por Veículo", color="Reincidencias")
     st.plotly_chart(fig_reinc, use_container_width=True)
 
-    # === Gráfico de Não Conformidade por Item (resumido) ===
-    st.markdown("## 🔧 Não Conformidades por Item")
-    problemas_por_item = df_filtrado[itens_nao_conformes].apply(lambda col: (col == "Não Conforme").sum())
-    problemas_df = pd.DataFrame({"Item": problemas_por_item.index, "Qtd": problemas_por_item.values})
-    fig_problemas = px.bar(problemas_df, x="Item", y="Qtd", text="Qtd", color_discrete_sequence=["darkorange"])
-    fig_problemas.update_traces(textposition="outside")
-    fig_problemas.update_layout(xaxis_title="Item", yaxis_title="Quantidade de Não Conformidades")
-    st.plotly_chart(fig_problemas, use_container_width=True)
+    # 🔧 Indicador cruzado: Manutenção Programada x Reincidências
+    st.subheader("\ud83d\udd27 Indicador Cruzado: Manutenção Programada x Reincidências")
+    cruzado = pd.merge(reincidencias_por_placa, manut, how="left", left_on="Placa do Caminhão", right_on="PLACA")
+    fig_cruzado = px.scatter(cruzado, x="Reincidencias", y=" MANUT. PROGRAMADA", color="MODELO", hover_data=["PLACA"],
+                             title="Reincidências vs. Manutenção Programada")
+    st.plotly_chart(fig_cruzado, use_container_width=True)
 
-    # === Tabela de Legenda dos Itens ===
-    st.markdown("### 📌 Legenda dos Itens de Verificação")
-    legenda_df = pd.DataFrame({"Índice": list(col_map.values()), "Descrição": list(col_map.keys())})
-    st.dataframe(legenda_df, use_container_width=True, hide_index=True)
+    # 🚨 Não Conformidades por Item (com índice)
+    st.subheader("🚨 Não Conformidades por Item")
+    item_labels = {f"{i+1:02d}": col for i, col in enumerate(cols_itens)}
+    df_nci = pd.DataFrame({"Item": list(item_labels.keys()),
+                           "Descrição": list(item_labels.values()),
+                           "Não Conformidades": [df[col].str.lower().ne("ok").sum() for col in cols_itens]})
+    fig_nci = px.bar(df_nci, x="Item", y="Não Conformidades", hover_data=["Descrição"],
+                     title="Quantidade de Não Conformidades por Item (Código)")
+    st.plotly_chart(fig_nci, use_container_width=True)
 
-    # === Indicador cruzado com manutenção programada ===
-    st.markdown("## 🔧 Indicador Cruzado: Manutenção Programada x Reincidências")
-    cruzado = pd.merge(reincidencias, manu, left_on="Placa do Caminhão", right_on="PLACA", how="left")
-    cruzado["MANUT. PROGRAMADA"] = pd.to_datetime(cruzado[" MANUT. PROGRAMADA"], errors='coerce')
-
-    fig_manu = px.scatter(cruzado, x="MANUT. PROGRAMADA", y="Reincidências", color="PLACA",
-                          hover_data=["MODELO", "ANO/MODELO"],
-                          labels={"MANUT. PROGRAMADA": "Data da Manutenção"},
-                          color_discrete_sequence=px.colors.qualitative.Set1)
-    st.plotly_chart(fig_manu, use_container_width=True)
-
-    # === Expansor com dados brutos ===
-    with st.expander("📊 Ver dados brutos (checklist)"):
-        st.dataframe(df_filtrado, use_container_width=True)
-
+    # Tabela opcional
+    with st.expander("Ver gabarito de Itens", expanded=False):
+        st.dataframe(df_nci.set_index("Item"))
 else:
-    st.info("🔄 Aguarde o envio dos dois arquivos para visualizar o dashboard.")
+    st.info("📂 Por favor, envie os dois arquivos .xlsx para visualizar o dashboard.")
