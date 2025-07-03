@@ -41,17 +41,6 @@ def colorize_severity(val):
     colors = {"green": "#2ecc71", "yellow": "#f1c40f", "red": "#e74c3c"}
     return f'<span style="color:{colors[cor]}; font-weight:bold;">{val}</span>'
 
-def display_image_gallery(links, cols=3, width=200):
-    cols_st = st.columns(cols)
-    for i, link in enumerate(links):
-        with cols_st[i % cols]:
-            st.write(f"Tentando carregar imagem: {link}")  # DEBUG
-            try:
-                st.image(link, width=width)
-            except Exception as e:
-                st.write(f"Erro ao carregar imagem: {e}")
-                st.markdown(f"[Ver foto]({link})")
-
 def main():
     st.title("🚛 Dashboard Checklist Veicular")
 
@@ -66,7 +55,6 @@ def main():
         df = load_excel(uploaded_checklist)
         manut = load_excel(uploaded_manut)
 
-    # Colunas importantes
     col_fotos = "Anexe as fotos das não conformidades:"
     col_obs = "Observações:"
     col_status = "Status NC"
@@ -90,7 +78,6 @@ def main():
     df["Carimbo de data/hora"] = pd.to_datetime(df["Carimbo de data/hora"], errors='coerce')
     df["Data"] = df["Carimbo de data/hora"].dt.date
 
-    # Filtro data
     min_date, max_date = df["Carimbo de data/hora"].min(), df["Carimbo de data/hora"].max()
     start_date = st.sidebar.date_input("Data inicial", min_date.date() if pd.notnull(min_date) else datetime.today())
     end_date = st.sidebar.date_input("Data final", max_date.date() if pd.notnull(max_date) else datetime.today())
@@ -100,7 +87,6 @@ def main():
 
     df = df[(df["Carimbo de data/hora"] >= pd.Timestamp(start_date)) & (df["Carimbo de data/hora"] <= pd.Timestamp(end_date) + pd.Timedelta(days=1))]
 
-    # Filtros motoristas e placas
     motoristas = sorted(df["Motorista"].dropna().unique())
     placas = sorted(df["Placa do Caminhão"].dropna().unique())
 
@@ -112,18 +98,15 @@ def main():
     if placa_sel:
         df = df[df["Placa do Caminhão"].isin(placa_sel)]
 
-    # Filtro status NC
     status_options = ["Todos", "Aberto / Em andamento", "Concluído"]
     status_sel = st.sidebar.selectbox("Filtrar Status da Não Conformidade", options=status_options, index=0)
 
-    # Prepara coluna itens para contar NC
     cols_excluir = checklist_required + ["Data", "Km atual"]
     cols_itens = [col for col in df.columns if col not in cols_excluir]
 
     df_itens = df[cols_itens].astype(str).applymap(lambda x: x.strip().lower())
     df["Reincidencias"] = df_itens.apply(lambda row: sum(v != "ok" and v != "" for v in row), axis=1)
 
-    # Filtra pelo status NC
     if status_sel == "Aberto / Em andamento":
         df = df[df[col_status].str.lower().isin(["aberto", "em andamento"])]
     elif status_sel == "Concluído":
@@ -160,7 +143,7 @@ def main():
     cruzado = pd.merge(reincid_por_placa, manut, how="left", left_on="Placa do Caminhão", right_on="PLACA")
     cruzado = cruzado.dropna(subset=["MANUT. PROGRAMADA"]).sort_values(by="Reincidencias", ascending=False)
     cruzado_display = cruzado[["PLACA", "MODELO", "MANUT. PROGRAMADA", "Reincidencias", "Índice de Severidade"]].copy()
-    cruzado_display["Índice de Severidade"] = cruzado_display["Índice de Severidade"].apply(colorize_severity)
+    cruzado_display["Índice de Severidade"] = cruzado_display["Índice de Severidade"].apply(lambda v: f'<span style="color:#2ecc71;font-weight:bold;">{v}</span>' if v <= 0.1 else (f'<span style="color:#f1c40f;font-weight:bold;">{v}</span>' if v <= 0.3 else f'<span style="color:#e74c3c;font-weight:bold;">{v}</span>'))
     st.markdown("## Cruzamento Manutenção Programada x Não Conformidades")
     st.write(cruzado_display.to_html(escape=False), unsafe_allow_html=True)
 
@@ -188,21 +171,26 @@ def main():
             st.markdown("## Observações Registradas")
             st.dataframe(obs)
 
-    st.markdown("## Fotos das Não Conformidades")
+    st.markdown("## Links das Fotos das Não Conformidades por Veículo")
+
     if col_fotos in df.columns:
         fotos_df = df[["Data", "Motorista", "Placa do Caminhão", col_fotos, col_status]].dropna(subset=[col_fotos])
         if fotos_df.empty:
-            st.write("Nenhuma foto anexada.")
+            st.write("Nenhum link de foto encontrado.")
         else:
-            for _, row in fotos_df.iterrows():
-                # Aplica filtro status NC aqui também
-                status = str(row[col_status]).lower()
-                if (status_sel == "Todos" or
-                    (status_sel == "Aberto / Em andamento" and status in ["aberto", "em andamento"]) or
-                    (status_sel == "Concluído" and status == "concluído")):
-                    st.markdown(f"**{row['Data']} - {row['Placa do Caminhão']} - {row['Motorista']} - Status: {row[col_status]}**")
-                    links = extract_drive_links(row[col_fotos])
-                    display_image_gallery(links, cols=3, width=250)
+            placas_unicas = fotos_df["Placa do Caminhão"].unique()
+            for placa in placas_unicas:
+                st.markdown(f"### Veículo: {placa}")
+                df_placa = fotos_df[fotos_df["Placa do Caminhão"] == placa]
+                for _, row in df_placa.iterrows():
+                    status = str(row[col_status]).lower()
+                    if (status_sel == "Todos" or
+                        (status_sel == "Aberto / Em andamento" and status in ["aberto", "em andamento"]) or
+                        (status_sel == "Concluído" and status == "concluído")):
+                        links = extract_drive_links(row[col_fotos])
+                        st.markdown(f"- **{row['Data']} - {row['Motorista']} - Status: {row[col_status]}**")
+                        for link in links:
+                            st.markdown(f"  - [Link da foto]({link})")
     else:
         st.write("Coluna de fotos não encontrada no arquivo.")
 
