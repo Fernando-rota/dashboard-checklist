@@ -99,17 +99,13 @@ def main():
     cols_excluir = checklist_required + ["Data", "Km atual"]
     cols_itens = [col for col in df.columns if col not in cols_excluir]
 
-    # --- Cálculo das Não Conformidades ---
     df_itens = df[cols_itens].astype(str).applymap(lambda x: x.strip().lower())
     df["Reincidencias"] = df_itens.apply(lambda row: sum(v != "ok" and v != "" for v in row), axis=1)
 
-    # Filtra por status NC
     if status_sel == "Aberto / Em andamento":
         df = df[df[col_status].str.lower().isin(["aberto", "em andamento"])]
     elif status_sel == "Concluído":
         df = df[df[col_status].str.lower() == "concluído"]
-
-    total_nc = df["Reincidencias"].sum()
 
     reincid_por_placa = df.groupby("Placa do Caminhão")["Reincidencias"].sum().reset_index()
 
@@ -121,22 +117,10 @@ def main():
         veiculo_top = "N/A"
         nc_top = 0
 
-    motorista_freq = df["Motorista"].value_counts()
-    if not motorista_freq.empty:
-        max_registros = motorista_freq.max()
-        motoristas_top = motorista_freq[motorista_freq == max_registros].index.tolist()
-        motorista_top_str = ", ".join(motoristas_top)
-    else:
-        motorista_top_str = "N/A"
-
-    # KPIs
     st.markdown("## KPIs Gerais")
-    k1, k2, k3 = st.columns(3)
-    k1.metric("Total de Não Conformidades", int(total_nc))
-    k2.metric("Veículo com Mais Não Conformidades", veiculo_top, f"{int(nc_top)} ocorrências")
-    k3.metric("Motorista(s) com Mais Registros", motorista_top_str)
+    k1, _, _ = st.columns([1, 1, 1])
+    k1.metric("Veículo com Mais Não Conformidades", veiculo_top, f"{int(nc_top)} ocorrências")
 
-    # Gráfico NC por veículo
     st.markdown("## Não Conformidades por Veículo")
     fig1 = px.bar(
         reincid_por_placa.sort_values("Reincidencias", ascending=True),
@@ -149,7 +133,6 @@ def main():
     )
     st.plotly_chart(fig1, use_container_width=True)
 
-    # Cruzamento Manutenção
     manut = manut.rename(columns=lambda x: x.strip())
     cruzado = pd.merge(reincid_por_placa, manut, how="left", left_on="Placa do Caminhão", right_on="PLACA")
     cruzado = cruzado.dropna(subset=["MANUT. PROGRAMADA"]).sort_values(by="Reincidencias", ascending=False)
@@ -167,7 +150,6 @@ def main():
     st.markdown("## Cruzamento Manutenção Programada x Não Conformidades")
     st.write(cruzado_display.to_html(escape=False), unsafe_allow_html=True)
 
-    # NC por Item
     st.markdown("## Não Conformidades por Item")
     df_nc_item = pd.DataFrame({
         "Item": cols_itens,
@@ -186,14 +168,12 @@ def main():
     ), use_container_width=True)
     st.dataframe(df_nc_item.reset_index(drop=True))
 
-    # Observações
     if col_obs in df.columns:
         obs = df[["Data", "Motorista", "Placa do Caminhão", col_obs, col_status]].dropna(subset=[col_obs])
         if not obs.empty:
             st.markdown("## Observações Registradas")
             st.dataframe(obs)
 
-    # Links das fotos
     st.markdown("## Links das Fotos das Não Conformidades por Veículo")
     if col_fotos in df.columns:
         fotos_df = df[["Data", "Motorista", "Placa do Caminhão", col_fotos, col_status]].dropna(subset=[col_fotos])
@@ -204,15 +184,15 @@ def main():
             for placa in placas_unicas:
                 st.markdown(f"### Veículo: {placa}")
                 df_placa = fotos_df[fotos_df["Placa do Caminhão"] == placa]
-                for _, row in df_placa.iterrows():
+                for i, (_, row) in enumerate(df_placa.iterrows(), 1):
                     status = str(row[col_status]).lower()
                     if (status_sel == "Todos" or
                         (status_sel == "Aberto / Em andamento" and status in ["aberto", "em andamento"]) or
                         (status_sel == "Concluído" and status == "concluído")):
                         links = extract_drive_links(row[col_fotos])
-                        st.markdown(f"- **{row['Data']} - {row['Motorista']} - Status: {row[col_status]}**")
-                        for link in links:
-                            st.markdown(f"  - [Link da foto]({link})")
+                        st.markdown(f"**{i}. {row['Data']} - {row['Motorista']} - Status: {row[col_status]}**")
+                        for j, link in enumerate(links, 1):
+                            st.markdown(f"[🔗 Foto {j}]({link})")
     else:
         st.write("Coluna de fotos não encontrada no arquivo.")
 
