@@ -174,26 +174,28 @@ def main():
                 st.dataframe(obs)
 
     with aba5:
-        st.markdown("## Fotos das Não Conformidades por Veículo")
+        st.markdown("## Fotos das Não Conformidades")
         if col_fotos in df.columns:
             fotos_df = df[["Data", "Motorista", "Placa do Caminhão", col_fotos, col_status] + cols_itens].dropna(subset=[col_fotos])
+            placas_fotos = sorted(fotos_df["Placa do Caminhão"].unique())
+            placa_filtro_fotos = st.selectbox("Filtrar Placa com Foto", options=["Todas"] + placas_fotos)
+
+            if placa_filtro_fotos != "Todas":
+                fotos_df = fotos_df[fotos_df["Placa do Caminhão"] == placa_filtro_fotos]
+
             if fotos_df.empty:
                 st.write("Nenhum link de foto encontrado.")
             else:
-                placas_unicas = fotos_df["Placa do Caminhão"].unique()
-                for placa in placas_unicas:
-                    st.markdown(f"### 🚚 Veículo: `{placa}`")
-                    df_placa = fotos_df[fotos_df["Placa do Caminhão"] == placa]
-                    for _, row in df_placa.iterrows():
-                        nc_items = [col for col in cols_itens if row[col].strip().lower() != "ok"]
-                        links = extract_drive_links(row[col_fotos])
-                        st.markdown(f"**📅 {row['Data']} - 👨‍✈️ {row['Motorista']} - Status: {row[col_status]}**")
-                        if nc_items:
-                            st.markdown("**🔧 Itens Não Conformes:**")
-                            st.markdown(", ".join(nc_items))
-                        for i, link in enumerate(links, 1):
-                            st.markdown(f"[🔗 Foto {i}]({link})")
-                        st.markdown("---")
+                for _, row in fotos_df.iterrows():
+                    nc_items = [col for col in cols_itens if row[col].strip().lower() != "ok"]
+                    links = extract_drive_links(row[col_fotos])
+                    st.markdown(f"**📅 {row['Data']} - 👨‍✈️ {row['Motorista']} - 🚚 {row['Placa do Caminhão']} - Status: {row[col_status]}**")
+                    if nc_items:
+                        st.markdown("**🔧 Itens Não Conformes:**")
+                        st.markdown(", ".join(nc_items))
+                    for i, link in enumerate(links, 1):
+                        st.markdown(f"[🔗 Foto {i}]({link})")
+                    st.markdown("---")
         else:
             st.warning("Coluna de fotos não encontrada no checklist.")
 
