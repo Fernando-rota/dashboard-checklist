@@ -64,14 +64,8 @@ def main():
         st.error(f"Colunas faltantes no checklist: {missing}")
         return
 
-    manut_required = ["PLACA", "MODELO", "MANUT. PROGRAMADA"]
-    missing_manut = [col for col in manut_required if col not in manut.columns]
-    if missing_manut:
-        st.error(f"Colunas faltantes no arquivo de manutenção: {missing_manut}")
-        return
-
     df["Carimbo de data/hora"] = pd.to_datetime(df["Carimbo de data/hora"], errors='coerce')
-    df["Data"] = df["Carimbo de data/hora"].dt.strftime('%d/%m/%Y')
+    df["Data"] = df["Carimbo de data/hora"].dt.strftime("%d/%m/%Y")
 
     min_date, max_date = df["Carimbo de data/hora"].min(), df["Carimbo de data/hora"].max()
     start_date = st.sidebar.date_input("Data inicial", min_date.date() if pd.notnull(min_date) else datetime.today())
@@ -107,96 +101,101 @@ def main():
     elif status_sel == "Concluído":
         df = df[df[col_status].str.lower() == "concluído"]
 
-    reincid_por_placa = df.groupby("Placa do Caminhão")["Reincidencias"].sum().reset_index()
+    aba1, aba2, aba3, aba4, aba5 = st.tabs([
+        "📊 KPIs e Gráficos",
+        "📋 Cruzamento com Manutenção",
+        "📌 Não Conformidades por Item",
+        "📝 Observações",
+        "📸 Fotos das Não Conformidades"
+    ])
 
-    if not reincid_por_placa.empty:
-        max_nc_idx = reincid_por_placa["Reincidencias"].idxmax()
-        veiculo_top = reincid_por_placa.loc[max_nc_idx, "Placa do Caminhão"]
-        nc_top = reincid_por_placa.loc[max_nc_idx, "Reincidencias"]
-    else:
-        veiculo_top = "N/A"
-        nc_top = 0
+    with aba1:
+        reincid_por_placa = df.groupby("Placa do Caminhão")["Reincidencias"].sum().reset_index()
+        veiculo_top = reincid_por_placa.loc[reincid_por_placa["Reincidencias"].idxmax(), "Placa do Caminhão"] if not reincid_por_placa.empty else "N/A"
+        nc_top = reincid_por_placa["Reincidencias"].max() if not reincid_por_placa.empty else 0
 
-    st.markdown("## KPIs Gerais")
-    k1, _, _ = st.columns([1, 1, 1])
-    k1.metric("Veículo com Mais Não Conformidades", veiculo_top, f"{int(nc_top)} ocorrências")
+        st.markdown("## KPIs Gerais")
+        st.metric("Veículo com Mais Não Conformidades", veiculo_top, f"{int(nc_top)} ocorrências")
 
-    st.markdown("## Não Conformidades por Veículo")
-    fig1 = px.bar(
-        reincid_por_placa.sort_values("Reincidencias", ascending=True),
-        x="Reincidencias",
-        y="Placa do Caminhão",
-        orientation="h",
-        color="Reincidencias",
-        color_continuous_scale=["green", "yellow", "red"],
-        labels={"Reincidencias": "Qtde de Não Conformidades", "Placa do Caminhão": "Placa"}
-    )
-    st.plotly_chart(fig1, use_container_width=True)
+        st.markdown("## Não Conformidades por Veículo")
+        fig1 = px.bar(
+            reincid_por_placa.sort_values("Reincidencias", ascending=True),
+            x="Reincidencias",
+            y="Placa do Caminhão",
+            orientation="h",
+            color="Reincidencias",
+            color_continuous_scale=["green", "yellow", "red"],
+            labels={"Reincidencias": "Qtde de Não Conformidades", "Placa do Caminhão": "Placa"}
+        )
+        st.plotly_chart(fig1, use_container_width=True)
 
-    manut = manut.rename(columns=lambda x: x.strip())
-    cruzado = pd.merge(reincid_por_placa, manut, how="left", left_on="Placa do Caminhão", right_on="PLACA")
-    cruzado = cruzado.dropna(subset=["MANUT. PROGRAMADA"]).sort_values(by="Reincidencias", ascending=False)
-    cruzado_display = cruzado[["PLACA", "MODELO", "MANUT. PROGRAMADA", "Reincidencias"]].copy()
+    with aba2:
+        manut = manut.rename(columns=lambda x: x.strip())
+        cruzado = pd.merge(reincid_por_placa, manut, how="left", left_on="Placa do Caminhão", right_on="PLACA")
+        cruzado = cruzado.dropna(subset=["MANUT. PROGRAMADA"]).sort_values(by="Reincidencias", ascending=False)
+        cruzado_display = cruzado[["PLACA", "MODELO", "MANUT. PROGRAMADA", "Reincidencias"]].copy()
 
-    def colorize_severity(val):
-        if val <= 0.1:
-            return f'<span style="color:#2ecc71;font-weight:bold;">{val:.3f}</span>'
-        elif val <= 0.3:
-            return f'<span style="color:#f1c40f;font-weight:bold;">{val:.3f}</span>'
-        else:
-            return f'<span style="color:#e74c3c;font-weight:bold;">{val:.3f}</span>'
+        def colorize_severity(val):
+            if val <= 0.1:
+                return f'<span style="color:#2ecc71;font-weight:bold;">{val:.3f}</span>'
+            elif val <= 0.3:
+                return f'<span style="color:#f1c40f;font-weight:bold;">{val:.3f}</span>'
+            else:
+                return f'<span style="color:#e74c3c;font-weight:bold;">{val:.3f}</span>'
 
-    cruzado_display["Índice de Severidade"] = (cruzado["Reincidencias"] / len(cols_itens)).round(3).apply(colorize_severity)
-    st.markdown("## Cruzamento Manutenção Programada x Não Conformidades")
-    st.write(cruzado_display.to_html(escape=False), unsafe_allow_html=True)
+        cruzado_display["Índice de Severidade"] = (cruzado["Reincidencias"] / len(cols_itens)).round(3).apply(colorize_severity)
+        st.markdown("## Cruzamento Manutenção Programada x Não Conformidades")
+        st.write(cruzado_display.to_html(escape=False), unsafe_allow_html=True)
 
-    st.markdown("## Não Conformidades por Item")
-    df_nc_item = pd.DataFrame({
-        "Item": cols_itens,
-        "Não Conformidades": [df_itens[col].ne("ok").sum() for col in cols_itens]
-    })
-    df_nc_item = df_nc_item[df_nc_item["Não Conformidades"] > 0].sort_values(by="Não Conformidades", ascending=False)
-    df_nc_item["% do Total"] = ((df_nc_item["Não Conformidades"] / df_nc_item["Não Conformidades"].sum()) * 100).round(1)
-    st.plotly_chart(px.bar(
-        df_nc_item,
-        y="Item",
-        x="Não Conformidades",
-        orientation="h",
-        color="Não Conformidades",
-        color_continuous_scale=["green", "yellow", "red"],
-        labels={"Não Conformidades": "Quantidade", "Item": "Item de Checklist"}
-    ), use_container_width=True)
-    st.dataframe(df_nc_item.reset_index(drop=True))
+    with aba3:
+        st.markdown("## Não Conformidades por Item")
+        df_nc_item = pd.DataFrame({
+            "Item": cols_itens,
+            "Não Conformidades": [df_itens[col].ne("ok").sum() for col in cols_itens]
+        })
+        df_nc_item = df_nc_item[df_nc_item["Não Conformidades"] > 0].sort_values(by="Não Conformidades", ascending=False)
+        df_nc_item["% do Total"] = ((df_nc_item["Não Conformidades"] / df_nc_item["Não Conformidades"].sum()) * 100).round(1)
+        st.plotly_chart(px.bar(
+            df_nc_item,
+            y="Item",
+            x="Não Conformidades",
+            orientation="h",
+            color="Não Conformidades",
+            color_continuous_scale=["green", "yellow", "red"],
+            labels={"Não Conformidades": "Quantidade", "Item": "Item de Checklist"}
+        ), use_container_width=True)
+        st.dataframe(df_nc_item.reset_index(drop=True))
 
-    if col_obs in df.columns:
-        obs = df[["Data", "Motorista", "Placa do Caminhão", col_obs, col_status]].dropna(subset=[col_obs])
-        if not obs.empty:
-            st.markdown("## Observações Registradas")
-            st.dataframe(obs)
+    with aba4:
+        if col_obs in df.columns:
+            obs = df[["Data", "Motorista", "Placa do Caminhão", col_obs, col_status]].dropna(subset=[col_obs])
+            if not obs.empty:
+                st.markdown("## Observações Registradas")
+                st.dataframe(obs)
 
-    st.markdown("## 📸 Fotos das Não Conformidades por Veículo")
-    if col_fotos in df.columns:
-        fotos_df = df[["Data", "Motorista", "Placa do Caminhão", col_fotos, col_status]].dropna(subset=[col_fotos])
-        if fotos_df.empty:
-            st.write("Nenhum link de foto encontrado.")
-        else:
-            placas_unicas = fotos_df["Placa do Caminhão"].unique()
-            for placa in placas_unicas:
-                st.markdown(f"### Veículo: {placa}")
-                df_placa = fotos_df[fotos_df["Placa do Caminhão"] == placa]
-                for i, (_, row) in enumerate(df_placa.iterrows(), 1):
-                    status = str(row[col_status]).lower()
-                    if (status_sel == "Todos" or
-                        (status_sel == "Aberto / Em andamento" and status in ["aberto", "em andamento"]) or
-                        (status_sel == "Concluído" and status == "concluído")):
+    with aba5:
+        st.markdown("## Fotos das Não Conformidades por Veículo")
+        if col_fotos in df.columns:
+            fotos_df = df[["Data", "Motorista", "Placa do Caminhão", col_fotos, col_status] + cols_itens].dropna(subset=[col_fotos])
+            if fotos_df.empty:
+                st.write("Nenhum link de foto encontrado.")
+            else:
+                placas_unicas = fotos_df["Placa do Caminhão"].unique()
+                for placa in placas_unicas:
+                    st.markdown(f"### 🚚 Veículo: `{placa}`")
+                    df_placa = fotos_df[fotos_df["Placa do Caminhão"] == placa]
+                    for _, row in df_placa.iterrows():
+                        nc_items = [col for col in cols_itens if row[col].strip().lower() != "ok"]
                         links = extract_drive_links(row[col_fotos])
-                        st.markdown(f"**{i}. {row['Data']} - {row['Motorista']} - Status: {row[col_status]}**")
-                        cols = st.columns(len(links))
-                        for j, link in enumerate(links):
-                            with cols[j]:
-                                st.markdown(f"[🔗 Foto {j+1}]({link})", unsafe_allow_html=True)
-    else:
-        st.write("Coluna de fotos não encontrada no arquivo.")
+                        st.markdown(f"**📅 {row['Data']} - 👨‍✈️ {row['Motorista']} - Status: {row[col_status]}**")
+                        if nc_items:
+                            st.markdown("**🔧 Itens Não Conformes:**")
+                            st.markdown(", ".join(nc_items))
+                        for i, link in enumerate(links, 1):
+                            st.markdown(f"[🔗 Foto {i}]({link})")
+                        st.markdown("---")
+        else:
+            st.warning("Coluna de fotos não encontrada no checklist.")
 
 if __name__ == "__main__":
     main()
