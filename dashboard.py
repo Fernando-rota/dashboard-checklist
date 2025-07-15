@@ -9,7 +9,8 @@ st.set_page_config(page_title="Dashboard Checklist Veicular", layout="wide")
 @st.cache_data
 def load_excel(file):
     df = pd.read_excel(file)
-    df.columns = df.columns.str.strip()
+    df.columns = df.columns.str.strip().str.replace('\s+', ' ', regex=True)
+    df = df.loc[:, ~df.columns.str.contains('^Unnamed')]
     return df
 
 def extract_drive_links(urls_string):
@@ -65,16 +66,22 @@ def main():
         return
 
     df["Carimbo de data/hora"] = pd.to_datetime(df["Carimbo de data/hora"], errors='coerce')
+    if df["Carimbo de data/hora"].isna().all():
+        st.error("❌ Nenhuma data válida encontrada na coluna 'Carimbo de data/hora'.")
+        return
+
     df["Data"] = df["Carimbo de data/hora"].dt.strftime("%d/%m/%Y")
+    df[col_status] = df[col_status].fillna("").str.strip().str.lower()
 
     min_date, max_date = df["Carimbo de data/hora"].min(), df["Carimbo de data/hora"].max()
-    start_date = st.sidebar.date_input("Data inicial", min_date.date() if pd.notnull(min_date) else datetime.today())
-    end_date = st.sidebar.date_input("Data final", max_date.date() if pd.notnull(max_date) else datetime.today())
+    start_date = st.sidebar.date_input("Data inicial", min_date.date())
+    end_date = st.sidebar.date_input("Data final", max_date.date())
     if start_date > end_date:
         st.sidebar.error("Data inicial não pode ser maior que a final.")
         return
 
-    df = df[(df["Carimbo de data/hora"] >= pd.Timestamp(start_date)) & (df["Carimbo de data/hora"] <= pd.Timestamp(end_date) + pd.Timedelta(days=1))]
+    df = df[(df["Carimbo de data/hora"] >= pd.Timestamp(start_date)) & 
+            (df["Carimbo de data/hora"] <= pd.Timestamp(end_date) + pd.Timedelta(days=1))]
 
     motoristas = sorted(df["Motorista"].dropna().unique())
     placas = sorted(df["Placa do Caminhão"].dropna().unique())
@@ -93,13 +100,13 @@ def main():
     cols_excluir = checklist_required + ["Data", "Km atual"]
     cols_itens = [col for col in df.columns if col not in cols_excluir]
 
-    df_itens = df[cols_itens].astype(str).applymap(lambda x: x.strip().lower())
+    df_itens = df[cols_itens].fillna("").astype(str).applymap(lambda x: x.strip().lower())
     df["Reincidencias"] = df_itens.apply(lambda row: sum(v != "ok" and v != "" for v in row), axis=1)
 
     if status_sel == "Aberto / Em andamento":
-        df = df[df[col_status].str.lower().isin(["aberto", "em andamento"])]
+        df = df[df[col_status].isin(["aberto", "em andamento"])]
     elif status_sel == "Concluído":
-        df = df[df[col_status].str.lower() == "concluído"]
+        df = df[df[col_status] == "concluído"]
 
     aba1, aba2, aba3, aba4, aba5 = st.tabs([
         "📊 KPIs e Gráficos",
@@ -116,6 +123,7 @@ def main():
 
         st.markdown("## KPIs Gerais")
         st.metric("Veículo com Mais Não Conformidades", veiculo_top, f"{int(nc_top)} ocorrências")
+        st.metric("Total de Checklists no Período", len(df))
 
         st.markdown("## Não Conformidades por Veículo")
         fig1 = px.bar(
@@ -131,21 +139,27 @@ def main():
 
     with aba2:
         manut = manut.rename(columns=lambda x: x.strip())
-        cruzado = pd.merge(reincid_por_placa, manut, how="left", left_on="Placa do Caminhão", right_on="PLACA")
-        cruzado = cruzado.dropna(subset=["MANUT. PROGRAMADA"]).sort_values(by="Reincidencias", ascending=False)
-        cruzado_display = cruzado[["PLACA", "MODELO", "MANUT. PROGRAMADA", "Reincidencias"]].copy()
+        if "PLACA" not in manut.columns or "MANUT. PROGRAMADA" not in manut.columns:
+            st.warning("❌ A planilha de manutenção está faltando as colunas 'PLACA' ou 'MANUT. PROGRAMADA'.")
+        else:
+            cruzado = pd.merge(reincid_por_placa, manut, how="left", left_on="Placa do Caminhão", right_on="PLACA")
+            cruzado = cruzado.dropna(subset=["MANUT. PROGRAMADA"]).sort_values(by="Reincidencias", ascending=False)
+            cruzado_display = cruzado[["PLACA", "MODELO", "MANUT. PROGRAMADA", "Reincidencias"]].copy()
 
-        def colorize_severity(val):
-            if val <= 0.1:
-                return f'<span style="color:#2ecc71;font-weight:bold;">{val:.3f}</span>'
-            elif val <= 0.3:
-                return f'<span style="color:#f1c40f;font-weight:bold;">{val:.3f}</span>'
-            else:
-                return f'<span style="color:#e74c3c;font-weight:bold;">{val:.3f}</span>'
+            def colorize_severity(val):
+                if val <= 0.1:
+                    return f'<span style="color:#2ecc71;font-weight:bold;">{val:.3f}</span>'
+                elif val <= 0.3:
+                    return f'<span style="color:#f1c40f;font-weight:bold;">{val:.3f}</span>'
+                else:
+                    return f'<span style="color:#e74c3c;font-weight:bold;">{val:.3f}</span>'
 
-        cruzado_display["Índice de Severidade"] = (cruzado["Reincidencias"] / len(cols_itens)).round(3).apply(colorize_severity)
-        st.markdown("## Cruzamento Manutenção Programada x Não Conformidades")
-        st.write(cruzado_display.to_html(escape=False), unsafe_allow_html=True)
+            cruzado_display["Índice de Severidade"] = (
+                (cruzado["Reincidencias"] / len(cols_itens)).round(3).apply(colorize_severity)
+            )
+
+            st.markdown("## Cruzamento Manutenção Programada x Não Conformidades")
+            st.write(cruzado_display.to_html(escape=False), unsafe_allow_html=True)
 
     with aba3:
         st.markdown("## Não Conformidades por Item")
@@ -155,6 +169,7 @@ def main():
         })
         df_nc_item = df_nc_item[df_nc_item["Não Conformidades"] > 0].sort_values(by="Não Conformidades", ascending=False)
         df_nc_item["% do Total"] = ((df_nc_item["Não Conformidades"] / df_nc_item["Não Conformidades"].sum()) * 100).round(1)
+
         st.plotly_chart(px.bar(
             df_nc_item,
             y="Item",
@@ -189,7 +204,12 @@ def main():
                 for _, row in fotos_df.iterrows():
                     nc_items = [col for col in cols_itens if row[col].strip().lower() != "ok"]
                     links = extract_drive_links(row[col_fotos])
-                    st.markdown(f"**📅 {row['Data']} - 👨‍✈️ {row['Motorista']} - 🚚 {row['Placa do Caminhão']} - Status: {row[col_status]}**")
+                    st.markdown(f"""
+**📅 {row['Data']}**  
+👨‍✈️ **Motorista:** {row['Motorista']}  
+🚚 **Placa:** {row['Placa do Caminhão']}  
+📍 **Status:** {row[col_status]}  
+""")
                     if nc_items:
                         st.markdown("**🔧 Itens Não Conformes:**")
                         st.markdown(", ".join(nc_items))
