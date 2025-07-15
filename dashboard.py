@@ -43,19 +43,33 @@ def classificar_veiculo(nc_total, status):
     else:
         return "✅ OK"
 
-# Mapeamento de categorias para itens (ajustável)
+# Mapeamento personalizado dos seus itens para categorias
 CATEGORIAS = {
-    "Farol": "Iluminação",
-    "Lanterna": "Iluminação",
-    "Freio": "Sistema de Freio",
-    "Pneu": "Pneus",
-    "Retrovisor": "Segurança",
-    "Limpador": "Segurança",
-    "Cinto": "Segurança",
-    "Direção": "Mecânica",
-    "Suspensão": "Mecânica",
-    "Nível de óleo": "Manutenção",
-    "Vazamento": "Manutenção"
+    "Drenar a água acumulada": "Combustível e Filtros",
+    "pré-filtro de combustivél": "Combustível e Filtros",
+    "pneus": "Pneus",
+    "estepe": "Pneus",
+    "vazamentos": "Vazamentos e Fluídos",
+    "níveis (água, óleo, fluidos": "Vazamentos e Fluídos",
+    "faróis": "Iluminação",
+    "lanternas": "Iluminação",
+    "luzes indicadoras": "Iluminação",
+    "luz de freio": "Iluminação",
+    "luz de marcha": "Iluminação",
+    "vidros": "Vidros e Retrovisores",
+    "espelhos retrovisores": "Vidros e Retrovisores",
+    "trincos": "Segurança",
+    "fechaduras": "Segurança",
+    "nível de fluido do sistema de freio": "Freios",
+    "direção hidráulica": "Direção",
+    "embreagem": "Embreagem",
+    "reservatório do lavador": "Sistema de Limpeza",
+    "funcionamento do limpador": "Sistema de Limpeza",
+    "pressão pneumática do sistema de freios": "Freios",
+    "funcionamento do tacógrafo": "Eletrônica",
+    "funcionamento do alarme sonoro": "Eletrônica",
+    "luzes de advertência": "Eletrônica",
+    "abastecimento de combustível": "Combustível e Filtros",
 }
 
 def mapear_categoria(item):
@@ -152,7 +166,6 @@ def main():
         "📊 Visão Geral", "🛠️ Manutenção", "📌 Itens Críticos", "📝 Observações", "📸 Fotos"
     ])
 
-    # --- Aba 1: Visão Geral ---
     with aba1:
         st.markdown("### 🔢 Indicadores")
 
@@ -181,7 +194,6 @@ def main():
         st.markdown("### 🏷️ Classificação dos Veículos")
         st.dataframe(df_veic_nc[["Placa do Caminhão", "Total_NC", "Classificação"]].sort_values("Total_NC", ascending=False).reset_index(drop=True))
 
-        # --- Gráfico: NCs por Veículo ---
         st.markdown("### 📉 NCs por Veículo")
         fig = px.bar(
             resumo.sort_values("Reincidencias"),
@@ -194,7 +206,6 @@ def main():
         )
         st.plotly_chart(fig, use_container_width=True)
 
-        # --- Tendência Temporal ---
         st.markdown("### 📅 Tendência Temporal de NCs")
         agrupamento = st.selectbox("Agrupar por", ["Diário", "Semanal", "Mensal"], index=2)
 
@@ -218,7 +229,6 @@ def main():
                            title="Tendência de Checklists com Não Conformidades")
         st.plotly_chart(fig_tend, use_container_width=True)
 
-    # --- Aba 2: Manutenção ---
     with aba2:
         manut.columns = manut.columns.str.strip()
         if "PLACA" not in manut.columns or "MANUT. PROGRAMADA" not in manut.columns:
@@ -232,7 +242,6 @@ def main():
             st.markdown("### 🛠️ Manutenção Programada x NCs")
             st.write(cruzado[["PLACA", "MODELO", "MANUT. PROGRAMADA", "Total_NC", "Índice de Severidade"]].to_html(escape=False), unsafe_allow_html=True)
 
-    # --- Aba 3: Itens Críticos ---
     with aba3:
         st.markdown("### 📌 Itens Críticos por Categoria")
         fig_cat = px.bar(df_cat_grouped,
@@ -245,7 +254,6 @@ def main():
         st.plotly_chart(fig_cat, use_container_width=True)
         st.dataframe(df_cat.sort_values("NCs", ascending=False).reset_index(drop=True))
 
-    # --- Aba 4: Observações ---
     with aba4:
         st.markdown("### 📝 Observações dos Motoristas")
         obs = df[["Data", "Motorista", "Placa do Caminhão", col_obs, col_status]].dropna(subset=[col_obs])
@@ -254,7 +262,6 @@ def main():
         else:
             st.info("Nenhuma observação registrada.")
 
-    # --- Aba 5: Fotos ---
     with aba5:
         st.markdown("### 📸 Fotos de Não Conformidades")
         fotos_df = df[["Data", "Motorista", "Placa do Caminhão", col_fotos, col_status] + itens].dropna(subset=[col_fotos])
