@@ -157,14 +157,21 @@ def main():
 
     df = df[(df["Carimbo de data/hora"] >= pd.Timestamp(start_date)) & (df["Carimbo de data/hora"] <= pd.Timestamp(end_date) + pd.Timedelta(days=1))]
 
+    # Motoristas
     motoristas = sorted(df["Motorista"].dropna().unique())
+    motoristas_opcoes = ["Todos"] + motoristas
+    sel_motorista = st.sidebar.selectbox("Motoristas", motoristas_opcoes)
+    if sel_motorista != "Todos":
+        df = df[df["Motorista"] == sel_motorista]
+
+    # Placas
     placas = sorted(df["Placa do Caminhão"].dropna().unique())
-    sel_motorista = st.sidebar.multiselect("Motoristas", motoristas, default=motoristas)
-    sel_placa = st.sidebar.multiselect("Placas", placas, default=placas)
+    placas_opcoes = ["Todos"] + placas
+    sel_placa = st.sidebar.selectbox("Placas", placas_opcoes)
+    if sel_placa != "Todos":
+        df = df[df["Placa do Caminhão"] == sel_placa]
 
-    df = df[df["Motorista"].isin(sel_motorista)]
-    df = df[df["Placa do Caminhão"].isin(sel_placa)]
-
+    # Status NC
     status_opcoes = ["Todos", "Aberto / Em andamento", "Concluído"]
     status_sel = st.sidebar.selectbox("Status da NC", status_opcoes)
 
