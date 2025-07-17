@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import plotly.express as px
 from datetime import datetime
 
 st.set_page_config(page_title="Checklist Veicular", layout="wide")
@@ -11,15 +12,11 @@ if not uploaded_file:
     st.warning("Por favor, envie um arquivo para visualizar o dashboard.")
     st.stop()
 
-# Carregar dados
 df = pd.read_excel(uploaded_file)
-df.columns = df.columns.str.strip()  # Limpa espaços extras
-
-# Tratamento de datas
+df.columns = df.columns.str.strip()
 df["Carimbo de data/hora"] = pd.to_datetime(df["Carimbo de data/hora"], errors="coerce")
 df["Data"] = df["Carimbo de data/hora"].dt.strftime("%d/%m/%Y")
 
-# Identificar colunas de itens
 col_fotos = next((c for c in df.columns if "foto" in c.lower()), None)
 col_status = next((c for c in df.columns if "status" in c.lower()), None)
 itens = [c for c in df.columns if c.startswith("Item")]
@@ -36,36 +33,34 @@ if start_date > end_date:
 
 df = df[(df["Carimbo de data/hora"] >= pd.Timestamp(start_date)) & (df["Carimbo de data/hora"] <= pd.Timestamp(end_date) + pd.Timedelta(days=1))]
 
-# Motoristas
+# Filtro motorista
 motoristas = sorted(df["Motorista"].dropna().unique())
 motoristas_opcoes = ["Todos"] + motoristas
 sel_motorista = st.sidebar.selectbox("Motoristas", motoristas_opcoes)
 if sel_motorista != "Todos":
     df = df[df["Motorista"] == sel_motorista]
 
-# Placas
+# Filtro placa
 placas = sorted(df["Placa do Caminhão"].dropna().unique())
 placas_opcoes = ["Todos"] + placas
 sel_placa = st.sidebar.selectbox("Placas", placas_opcoes)
 if sel_placa != "Todos":
     df = df[df["Placa do Caminhão"] == sel_placa]
 
-# Status NC
+# Filtro status
 status_opcoes = ["Todos", "Aberto / Em andamento", "Concluído"]
 status_sel = st.sidebar.selectbox("Status da NC", status_opcoes)
-
 if status_sel == "Aberto / Em andamento":
     df = df[df[col_status].isin(["aberto", "em andamento"])]
 elif status_sel == "Concluído":
     df = df[df[col_status] == "concluído"]
 
-# Função auxiliar
 def extract_drive_links(texto):
     if pd.isna(texto):
         return []
     return [part for part in texto.split() if "http" in part]
 
-# Contadores
+# KPIs
 total_checklists = len(df)
 total_nc = df[itens].apply(lambda x: (x.str.strip().str.lower() != "ok").sum(), axis=1).sum()
 porcentagem_nc = round((total_nc / (len(df) * len(itens))) * 100, 1) if len(df) > 0 else 0
@@ -96,8 +91,11 @@ with aba3:
     st.markdown("### 📈 Visão Geral de Não Conformidades por Placa")
     nc_por_placa = df.copy()
     nc_por_placa["NCs"] = nc_por_placa[itens].apply(lambda x: (x.str.strip().str.lower() != "ok").sum(), axis=1)
-    grafico = nc_por_placa.groupby("Placa do Caminhão")["NCs"].sum().sort_values(ascending=False)
-    st.bar_chart(grafico)
+    agrupado = nc_por_placa.groupby("Placa do Caminhão")["NCs"].sum().reset_index()
+    fig = px.bar(agrupado, x="Placa do Caminhão", y="NCs", color="NCs",
+                 title="Total de NCs por Placa", labels={"NCs": "Não Conformidades"},
+                 height=400)
+    st.plotly_chart(fig, use_container_width=True)
 
 with aba4:
     st.markdown("### 📊 Frequência de NC por Item")
@@ -105,8 +103,9 @@ with aba4:
     for item in itens:
         ncs = df[item].str.strip().str.lower() != "ok"
         frequencia[item] = ncs.sum()
-    freq_series = pd.Series(frequencia).sort_values(ascending=False)
-    st.bar_chart(freq_series)
+    freq_df = pd.DataFrame(list(frequencia.items()), columns=["Item", "Total NC"]).sort_values(by="Total NC", ascending=False)
+    fig2 = px.bar(freq_df, x="Item", y="Total NC", color="Total NC", title="Frequência de NC por Item", height=500)
+    st.plotly_chart(fig2, use_container_width=True)
 
 with aba5:
     st.markdown("### 📸 Fotos de Não Conformidades")
@@ -123,7 +122,6 @@ with aba5:
         for _, row in fotos_df.iterrows():
             nc_itens = [col for col in itens if row[col].strip().lower() != "ok"]
             links = extract_drive_links(row[col_fotos])
-
             st.markdown(f"""
 **📅 {row['Data']}**  
 👨‍✈️ **Motorista:** {row['Motorista']}  
