@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import re
-from datetime import datetime
 
 st.set_page_config(page_title="Dashboard Checklist Veicular", layout="wide")
 
@@ -93,8 +92,8 @@ def main():
     col_fotos = "Anexe as fotos das não conformidades:"
     col_obs = "Observações:"
     col_status = "Status NC"
-    obrigatorias = ["Carimbo de data/hora", "Motorista", "Placa do Caminhão", col_fotos, col_obs, col_status]
 
+    obrigatorias = ["Carimbo de data/hora", "Motorista", "Placa do Caminhão", col_fotos, col_obs, col_status]
     if any(col not in df.columns for col in obrigatorias):
         st.error(f"❌ Colunas obrigatórias ausentes: {[c for c in obrigatorias if c not in df.columns]}")
         return
@@ -109,76 +108,73 @@ def main():
 
     cols_excluir = obrigatorias + ["Data", "Km atual"]
     itens = [col for col in df.columns if col not in cols_excluir]
-    df_itens = df[itens].fillna("").astype(str).applymap(lambda x: x.strip().lower())
-    df["Reincidencias"] = df_itens.apply(lambda row: sum(v != "ok" and v != "" for v in row), axis=1)
 
     categorias = [mapear_categoria(item) for item in itens]
-    df_cat = pd.DataFrame({
-        "Item": itens,
-        "Categoria": categorias,
-        "NCs": [df_itens[col].ne("ok").sum() for col in itens]
-    })
-    df_cat = df_cat[df_cat["NCs"] > 0]
-    df_cat_grouped = df_cat.groupby("Categoria").sum().reset_index().sort_values("NCs", ascending=False)
+    df_cat = pd.DataFrame({"Item": itens, "Categoria": categorias})
+    df_cat_grouped = df_cat.groupby("Categoria").size().reset_index(name="Count")
 
-    # === FILTROS ===
+    # --- FILTROS ---
     st.sidebar.markdown("### 📅 Filtros")
 
-    min_date, max_date = df["Carimbo de data/hora"].min().date(), df["Carimbo de data/hora"].max().date()
-    start_date = st.sidebar.date_input("Data inicial", min_date, min_value=min_date, max_value=max_date)
-    end_date = st.sidebar.date_input("Data final", max_date, min_value=min_date, max_value=max_date)
+    min_date, max_date = df["Carimbo de data/hora"].min(), df["Carimbo de data/hora"].max()
+    start_date = st.sidebar.date_input("Data inicial", min_date.date())
+    end_date = st.sidebar.date_input("Data final", max_date.date())
     if start_date > end_date:
         st.sidebar.error("Data inicial não pode ser maior que a final.")
-        return
+        st.stop()
+
+    df = df[(df["Carimbo de data/hora"] >= pd.Timestamp(start_date)) & (df["Carimbo de data/hora"] <= pd.Timestamp(end_date) + pd.Timedelta(days=1))]
 
     motoristas = sorted(df["Motorista"].dropna().unique())
-    sel_motorista = st.sidebar.multiselect("Motoristas (busque e selecione)", motoristas, default=motoristas)
+    sel_motorista = st.sidebar.multiselect("Motoristas", motoristas, default=motoristas)
+    if not sel_motorista:
+        sel_motorista = motoristas
+    df = df[df["Motorista"].isin(sel_motorista)]
 
     placas = sorted(df["Placa do Caminhão"].dropna().unique())
-    sel_placa = st.sidebar.multiselect("Placas (busque e selecione)", placas, default=placas)
+    sel_placa = st.sidebar.multiselect("Placas", placas, default=placas)
+    if not sel_placa:
+        sel_placa = placas
+    df = df[df["Placa do Caminhão"].isin(sel_placa)]
 
-    status_options = ["aberto", "em andamento", "concluído"]
+    status_options = sorted(df[col_status].dropna().unique())
     sel_status = st.sidebar.multiselect("Status da NC", status_options, default=status_options)
+    if not sel_status:
+        sel_status = status_options
+    df = df[df[col_status].isin(sel_status)]
 
     categorias_disp = sorted(df_cat_grouped["Categoria"].unique())
     sel_categoria = st.sidebar.multiselect("Categorias de NC", categorias_disp, default=categorias_disp)
-
-    min_nc = int(df["Reincidencias"].min())
-    max_nc = int(df["Reincidencias"].max())
-    faixa_nc = st.sidebar.slider("Número mínimo de NCs", min_value=min_nc, max_value=max_nc, value=min_nc)
-
-    # Aplicar filtros
-    df_filtered = df[
-        (df["Carimbo de data/hora"].dt.date >= start_date) &
-        (df["Carimbo de data/hora"].dt.date <= end_date) &
-        (df["Motorista"].isin(sel_motorista)) &
-        (df["Placa do Caminhão"].isin(sel_placa)) &
-        (df[col_status].isin(sel_status)) &
-        (df["Reincidencias"] >= faixa_nc)
-    ]
+    if not sel_categoria:
+        sel_categoria = categorias_disp
 
     itens_filtrados = [item for item, cat in zip(itens, categorias) if cat in sel_categoria]
+    df_itens_filtrados = df[itens_filtrados].fillna("").astype(str).applymap(lambda x: x.strip().lower())
 
-    if itens_filtrados:
-        df_itens_filtered = df_filtered[itens_filtrados].fillna("").astype(str).applymap(lambda x: x.strip().lower())
-        mask_nc_categoria = df_itens_filtered.apply(lambda row: any(v != "ok" and v != "" for v in row), axis=1)
-        df_filtered = df_filtered[mask_nc_categoria]
-    else:
-        df_filtered = df_filtered.iloc[0:0]
+    min_nc = st.sidebar.slider("Número mínimo de NC no checklist", min_value=0, max_value=20, value=0)
+    df["NC_Filtrados"] = df_itens_filtrados.apply(lambda row: sum(v != "ok" and v != "" for v in row), axis=1)
+    df = df[df["NC_Filtrados"] >= min_nc]
 
-    if df_filtered.empty:
-        st.warning("Nenhum resultado para os filtros selecionados.")
-        return
+    # Recalcular reincidencias após filtros para indicadores
+    df_itens = df[itens].fillna("").astype(str).applymap(lambda x: x.strip().lower())
+    df["Reincidencias"] = df_itens.apply(lambda row: sum(v != "ok" and v != "" for v in row), axis=1)
 
-    df_itens_filtered_all = df_filtered[itens].fillna("").astype(str).applymap(lambda x: x.strip().lower())
-    df_filtered["Reincidencias"] = df_itens_filtered_all.apply(lambda row: sum(v != "ok" and v != "" for v in row), axis=1)
-
-    df_veic_nc = df_filtered.groupby("Placa do Caminhão").agg(
+    # Classificação veículos
+    df_veic_nc = df.groupby("Placa do Caminhão").agg(
         Total_NC=pd.NamedAgg(column="Reincidencias", aggfunc="sum"),
         Status_Aberto=pd.NamedAgg(column=col_status, aggfunc=lambda s: any(x in ["aberto", "em andamento"] for x in s))
     ).reset_index()
     df_veic_nc["Classificação"] = df_veic_nc.apply(lambda row: classificar_veiculo(row["Total_NC"], "aberto" if row["Status_Aberto"] else "concluído"), axis=1)
 
+    df_cat_counts = pd.DataFrame({
+        "Item": itens,
+        "Categoria": categorias,
+        "NCs": [df_itens[col].ne("ok").sum() for col in itens]
+    })
+    df_cat_counts = df_cat_counts[df_cat_counts["NCs"] > 0]
+    df_cat_grouped_counts = df_cat_counts.groupby("Categoria").sum().reset_index().sort_values("NCs", ascending=False)
+
+    # Abas
     aba1, aba2, aba3, aba4, aba5 = st.tabs([
         "📊 Visão Geral", "🛠️ Manutenção", "📌 Itens Críticos", "📝 Observações", "📸 Fotos"
     ])
@@ -186,15 +182,15 @@ def main():
     with aba1:
         st.markdown("### 🔢 Indicadores")
 
-        resumo = df_filtered.groupby("Placa do Caminhão")["Reincidencias"].sum().reset_index()
+        resumo = df.groupby("Placa do Caminhão")["Reincidencias"].sum().reset_index()
         veic_top = resumo.loc[resumo["Reincidencias"].idxmax(), "Placa do Caminhão"] if not resumo.empty else "N/A"
         total_nc = resumo["Reincidencias"].max() if not resumo.empty else 0
-        total_checklists = len(df_filtered)
-        checklists_com_nc = df_filtered["Reincidencias"].gt(0).sum()
+        total_checklists = len(df)
+        checklists_com_nc = df["Reincidencias"].gt(0).sum()
         pct_checklists_com_nc = round((checklists_com_nc / total_checklists) * 100, 1) if total_checklists > 0 else 0
-        media_nc_por_checklist = round(df_filtered["Reincidencias"].mean(), 2)
+        media_nc_por_checklist = round(df["Reincidencias"].mean(), 2)
         total_itens_verificados = total_checklists * len(itens)
-        media_pct_nc_por_checklist = round((df_filtered["Reincidencias"] / len(itens)).mean() * 100, 1)
+        media_pct_nc_por_checklist = round((df["Reincidencias"] / len(itens)).mean() * 100, 1)
 
         kpi1, kpi2 = st.columns(2)
         kpi1.metric("🚛 Veículo com Mais NCs", veic_top, f"{int(total_nc)} ocorrências")
@@ -227,22 +223,16 @@ def main():
         agrupamento = st.selectbox("Agrupar por", ["Diário", "Semanal", "Mensal"], index=2)
 
         if agrupamento == "Diário":
-            df_tend = df_filtered.groupby(df_filtered["Carimbo de data/hora"].dt.date).agg(
-                Checklists_Com_NC=("Reincidencias", lambda x: (x > 0).sum())
-            ).reset_index()
+            df_tend = df.groupby(df["Carimbo de data/hora"].dt.date).agg(Checklists_Com_NC=("Reincidencias", lambda x: (x > 0).sum())).reset_index()
             df_tend.rename(columns={"Carimbo de data/hora": "Data"}, inplace=True)
             xaxis_title = "Data"
         elif agrupamento == "Semanal":
-            df_tend = df_filtered.groupby(df_filtered["Carimbo de data/hora"].dt.to_period("W")).agg(
-                Checklists_Com_NC=("Reincidencias", lambda x: (x > 0).sum())
-            ).reset_index()
+            df_tend = df.groupby(df["Carimbo de data/hora"].dt.to_period("W")).agg(Checklists_Com_NC=("Reincidencias", lambda x: (x > 0).sum())).reset_index()
             df_tend["Carimbo de data/hora"] = df_tend["Carimbo de data/hora"].dt.start_time
             df_tend.rename(columns={"Carimbo de data/hora": "Data"}, inplace=True)
             xaxis_title = "Semana"
-        else:
-            df_tend = df_filtered.groupby(df_filtered["Carimbo de data/hora"].dt.to_period("M")).agg(
-                Checklists_Com_NC=("Reincidencias", lambda x: (x > 0).sum())
-            ).reset_index()
+        else:  # Mensal
+            df_tend = df.groupby(df["Carimbo de data/hora"].dt.to_period("M")).agg(Checklists_Com_NC=("Reincidencias", lambda x: (x > 0).sum())).reset_index()
             df_tend["Carimbo de data/hora"] = df_tend["Carimbo de data/hora"].dt.start_time
             df_tend.rename(columns={"Carimbo de data/hora": "Data"}, inplace=True)
             xaxis_title = "Mês"
@@ -257,18 +247,15 @@ def main():
         if "PLACA" not in manut.columns or "MANUT. PROGRAMADA" not in manut.columns:
             st.warning("❌ Colunas 'PLACA' ou 'MANUT. PROGRAMADA' ausentes.")
         else:
-            cruzado = pd.merge(df_veic_nc[["Placa do Caminhão", "Total_NC"]], manut, how="left",
-                              left_on="Placa do Caminhão", right_on="PLACA")
+            cruzado = pd.merge(df_veic_nc[["Placa do Caminhão", "Total_NC"]], manut, how="left", left_on="Placa do Caminhão", right_on="PLACA")
             cruzado = cruzado.dropna(subset=["MANUT. PROGRAMADA"]).sort_values(by="Total_NC", ascending=False)
             cruzado["Índice de Severidade"] = cruzado["Total_NC"].div(len(itens)).round(3).apply(severity_color)
-
             st.markdown("### 🛠️ Manutenção Programada x NCs")
-            st.write(cruzado[["PLACA", "MODELO", "MANUT. PROGRAMADA", "Total_NC", "Índice de Severidade"]].to_html(escape=False),
-                     unsafe_allow_html=True)
+            st.write(cruzado[["PLACA", "MODELO", "MANUT. PROGRAMADA", "Total_NC", "Índice de Severidade"]].to_html(escape=False), unsafe_allow_html=True)
 
     with aba3:
         st.markdown("### 📌 Itens Críticos por Categoria")
-        fig_cat = px.bar(df_cat_grouped,
+        fig_cat = px.bar(df_cat_grouped_counts,
                          x="NCs",
                          y="Categoria",
                          orientation="h",
@@ -276,11 +263,11 @@ def main():
                          color_continuous_scale=["green", "yellow", "red"],
                          labels={"NCs": "Não Conformidades", "Categoria": "Categoria"})
         st.plotly_chart(fig_cat, use_container_width=True)
-        st.dataframe(df_cat.sort_values("NCs", ascending=False).reset_index(drop=True))
+        st.dataframe(df_cat_counts.sort_values("NCs", ascending=False).reset_index(drop=True))
 
     with aba4:
         st.markdown("### 📝 Observações dos Motoristas")
-        obs = df_filtered[["Data", "Motorista", "Placa do Caminhão", col_obs, col_status]].dropna(subset=[col_obs])
+        obs = df[["Data", "Motorista", "Placa do Caminhão", col_obs, col_status]].dropna(subset=[col_obs])
         if not obs.empty:
             st.dataframe(obs)
         else:
@@ -288,7 +275,7 @@ def main():
 
     with aba5:
         st.markdown("### 📸 Fotos de Não Conformidades")
-        fotos_df = df_filtered[["Data", "Motorista", "Placa do Caminhão", col_fotos, col_status] + itens].dropna(subset=[col_fotos])
+        fotos_df = df[["Data", "Motorista", "Placa do Caminhão", col_fotos, col_status] + itens].dropna(subset=[col_fotos])
         placas_disp = sorted(fotos_df["Placa do Caminhão"].unique())
         sel_foto = st.selectbox("Filtrar por Placa", ["Todas"] + placas_disp)
 
