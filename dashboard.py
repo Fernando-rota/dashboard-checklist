@@ -1,117 +1,101 @@
 import streamlit as st
 import pandas as pd
 
-def filtros_sidebar(df):
-    st.sidebar.markdown("## 🔎 Filtros do Dashboard")
+st.set_page_config(page_title="Dashboard Checklist", layout="wide")
 
-    # Padroniza nomes das colunas
-    df.columns = df.columns.str.strip().str.lower()
+def carregar_dados():
+    st.sidebar.title("📁 Upload dos Arquivos Excel")
+    checklist_file = st.sidebar.file_uploader("Checklist Diário (.xlsx)", type=["xlsx"], key="checklist")
+    prevent_file = st.sidebar.file_uploader("Manutenção Preventiva (.xlsx)", type=["xlsx"], key="prevent")
 
-    df["carimbo de data/hora"] = pd.to_datetime(df["carimbo de data/hora"])
+    if checklist_file is None or prevent_file is None:
+        st.warning("Por favor, envie os dois arquivos para continuar.")
+        st.stop()
 
-    with st.sidebar.expander("🎛️ Filtros", expanded=True):
-        # Botão de reset
-        if st.button("🔁 Limpar filtros"):
-            st.session_state.clear()
-            st.experimental_rerun()
+    df = pd.read_excel(checklist_file)
+    df_prevent = pd.read_excel(prevent_file)
 
-        # Filtro de texto por motorista ou placa
-        busca_texto = st.text_input("🔍 Buscar motorista ou placa")
+    return df, df_prevent
 
-        # Filtro por data
-        data_min = df["carimbo de data/hora"].min().date()
-        data_max = df["carimbo de data/hora"].max().date()
+def aplicar_filtros(df):
+    st.sidebar.title("🔍 Filtros")
 
-        start_date = st.date_input("📅 De", data_min, key="start_date")
-        end_date = st.date_input("📅 Até", data_max, key="end_date")
+    df["Data"] = pd.to_datetime(df["Data"])
+    datas = df["Data"].dt.date.sort_values().unique()
+    data_sel = st.sidebar.multiselect("📅 Data", options=datas, default=datas)
+    df = df[df["Data"].dt.date.isin(data_sel)]
 
-        def multiselect_com_todos(label, options, key):
-            selecionar_todos = st.checkbox(f"Selecionar todos os {label.lower()}", value=True, key=f"chk_{key}")
-            if selecionar_todos:
-                return options
-            else:
-                return st.multiselect(label, options, default=[], key=f"multi_{key}")
+    motoristas = sorted(df["Motorista"].dropna().unique())
+    todos_motoristas = st.sidebar.checkbox("Todos os motoristas", value=True)
+    motoristas_sel = motoristas if todos_motoristas else st.sidebar.multiselect("👤 Motorista", motoristas, default=motoristas)
+    df = df[df["Motorista"].isin(motoristas_sel)]
 
-        # Motoristas
-        motoristas = sorted(df["motorista"].dropna().unique())
-        sel_motoristas = multiselect_com_todos("Motoristas", motoristas, "motorista")
+    placas = sorted(df["Placa do Caminhão"].dropna().unique())
+    todas_placas = st.sidebar.checkbox("Todas as placas", value=True)
+    placas_sel = placas if todas_placas else st.sidebar.multiselect("🚛 Placa", placas, default=placas)
+    df = df[df["Placa do Caminhão"].isin(placas_sel)]
 
-        # Placas
-        placas = sorted(df["placa do caminhão"].dropna().unique())
-        sel_placas = multiselect_com_todos("Placas", placas, "placa")
+    status_nc = sorted(df["Status NC"].dropna().unique())
+    todos_status = st.sidebar.checkbox("Todos os status", value=True)
+    status_sel = status_nc if todos_status else st.sidebar.multiselect("📌 Status NC", status_nc, default=status_nc)
+    df = df[df["Status NC"].isin(status_sel)]
 
-        # Status NC
-        status_nc = sorted(df["status nc"].dropna().unique())
-        sel_status = multiselect_com_todos("Status NC", status_nc, "status")
+    return df
 
-        # Categoria (se houver)
-        if "categoria" in df.columns:
-            categorias = sorted(df["categoria"].dropna().unique())
-            sel_categorias = multiselect_com_todos("Categorias", categorias, "categoria")
-        else:
-            sel_categorias = None
+def gerar_kpis(df, df_prevent):
+    total_registros = len(df)
+    total_nc = df["Status NC"].str.lower().eq("não conforme").sum()
+    percentual_nc = round((total_nc / total_registros) * 100, 1) if total_registros else 0
 
-        # Nº mínimo de NCs
-        if "nº nc" in df.columns:
-            nc_min = st.slider("🔢 Nº mínimo de Não Conformidades", 0, 20, 0)
-        else:
-            nc_min = 0
+    placas_criticas = df[df["Status NC"].str.lower() == "não conforme"]["Placa do Caminhão"].value_counts()
+    top_placas_nc = placas_criticas.head(3).to_dict()
 
-    # Aplica os filtros
-    df_filtrado = df[
-        (df["carimbo de data/hora"].dt.date >= start_date) &
-        (df["carimbo de data/hora"].dt.date <= end_date) &
-        (df["motorista"].isin(sel_motoristas)) &
-        (df["placa do caminhão"].isin(sel_placas)) &
-        (df["status nc"].isin(sel_status))
-    ]
+    placas_manut = df_prevent["PLACA"].dropna().unique()
+    em_manutencao = df[df["Placa do Caminhão"].isin(placas_manut)]["Placa do Caminhão"].nunique()
 
-    if sel_categorias is not None:
-        df_filtrado = df_filtrado[df_filtrado["categoria"].isin(sel_categorias)]
+    return total_registros, total_nc, percentual_nc, top_placas_nc, em_manutencao
 
-    if "nº nc" in df_filtrado.columns:
-        df_filtrado = df_filtrado[df_filtrado["nº nc"] >= nc_min]
+def exibir_kpis(total, nc, percentual, top_placas, manut):
+    st.subheader("📊 Indicadores Gerais")
+    col1, col2, col3, col4 = st.columns(4)
 
-    if busca_texto:
-        busca_texto = busca_texto.lower()
-        df_filtrado = df_filtrado[
-            df_filtrado["motorista"].str.lower().str.contains(busca_texto, na=False) |
-            df_filtrado["placa do caminhão"].str.lower().str.contains(busca_texto, na=False)
-        ]
+    col1.metric("Total de Registros", total)
+    col2.metric("Total com NC", nc)
+    col3.metric("% NC", f"{percentual}%")
+    col4.metric("Veículos com Preventiva", manut)
 
-    return df_filtrado
+    st.markdown("#### 🚨 Top 3 Veículos com Mais NCs")
+    for placa, count in top_placas.items():
+        st.write(f"- {placa}: {count} NC(s)")
 
-
-# App principal com abas
 def main():
-    st.set_page_config(page_title="Checklist Veicular", layout="wide")
-    st.title("🚛 Dashboard Checklist Veicular")
+    st.title("✅ Dashboard de Checklist Veicular")
 
-    uploaded_file = st.file_uploader("📤 Envie a planilha de checklist (.xlsx)", type=["xlsx"])
-    if uploaded_file:
-        df = pd.read_excel(uploaded_file)
+    df, df_prevent = carregar_dados()
+    df = aplicar_filtros(df)
 
-        df_filtrado = filtros_sidebar(df)
-        st.success(f"{len(df_filtrado)} registros encontrados.")
+    aba1, aba2, aba3 = st.tabs(["📊 Visão Geral", "🛠️ Detalhamento", "🖼️ Fotos de NCs"])
 
-        # Abas com base nos dados filtrados
-        aba1, aba2, aba3 = st.tabs(["📋 Tabela", "📊 Gráficos", "📸 Não Conformidades"])
+    with aba1:
+        total, nc, percentual, top_placas, manut = gerar_kpis(df, df_prevent)
+        exibir_kpis(total, nc, percentual, top_placas, manut)
 
-        with aba1:
-            st.markdown("### ✅ Dados Filtrados")
-            st.dataframe(df_filtrado, use_container_width=True)
+        # Gráfico de tendência pode ser adicionado aqui se quiser
 
-        with aba2:
-            st.markdown("### 📈 Gráficos e Indicadores")
-            # aqui você adiciona os gráficos desejados com base em df_filtrado
+    with aba2:
+        st.markdown("### 📋 Tabela de Registros Filtrados")
+        st.dataframe(df, use_container_width=True)
 
-        with aba3:
-            st.markdown("### 🚫 Não Conformidades com Fotos")
-            # exiba imagens e observações dos registros com não conformidades
-
-    else:
-        st.info("Faça upload de um arquivo Excel (.xlsx) para começar.")
-
+    with aba3:
+        st.markdown("### 📸 Anexos de Não Conformidades")
+        if "Anexe as fotos das não conformidades:" in df.columns:
+            fotos = df[["Data", "Motorista", "Placa do Caminhão", "Anexe as fotos das não conformidades:"]]
+            fotos = fotos.dropna(subset=["Anexe as fotos das não conformidades:"])
+            for _, row in fotos.iterrows():
+                st.markdown(f"**{row['Data'].date()} | {row['Motorista']} | {row['Placa do Caminhão']}**")
+                st.image(row["Anexe as fotos das não conformidades:"], width=400)
+        else:
+            st.info("Coluna de fotos não encontrada.")
 
 if __name__ == "__main__":
     main()
