@@ -5,7 +5,6 @@ import re
 
 st.set_page_config(page_title="Dashboard Checklist Veicular", layout="wide")
 
-# --- Variáveis globais ---
 COLUNAS_OBRIGATORIAS = [
     "Carimbo de data/hora",
     "Motorista",
@@ -16,7 +15,6 @@ COLUNAS_OBRIGATORIAS = [
     "Status NC"
 ]
 
-# Mapeamento personalizado dos seus itens para categorias
 CATEGORIAS = {
     "Drenar a água acumulada": "Combustível e Filtros",
     "pré-filtro de combustivél": "Combustível e Filtros",
@@ -44,8 +42,6 @@ CATEGORIAS = {
     "luzes de advertência": "Eletrônica",
     "abastecimento de combustível": "Combustível e Filtros",
 }
-
-# --- Funções auxiliares ---
 
 @st.cache_data
 def load_excel(file):
@@ -91,7 +87,6 @@ def mapear_categoria(item):
     return "Outros"
 
 def agrupar_por_periodo(df, periodo):
-    """Agrupa dataframe pela coluna 'Carimbo de data/hora' conforme o período"""
     if periodo == "Diário":
         df_agrupado = df.groupby(df["Carimbo de data/hora"].dt.date).agg(
             Checklists_Com_NC=("Reincidencias", lambda x: (x > 0).sum())
@@ -112,8 +107,6 @@ def agrupar_por_periodo(df, periodo):
 
     return df_agrupado[["Data", "Checklists_Com_NC"]]
 
-# --- Função principal ---
-
 def main():
     st.title("🚛 Dashboard Checklist Veicular")
 
@@ -127,7 +120,6 @@ def main():
         df = load_excel(checklist_file)
         manut = load_excel(manut_file)
 
-    # Validar colunas obrigatórias
     if any(col not in df.columns for col in COLUNAS_OBRIGATORIAS):
         st.error(f"❌ Colunas obrigatórias ausentes: {[c for c in COLUNAS_OBRIGATORIAS if c not in df.columns]}")
         return
@@ -136,7 +128,6 @@ def main():
     col_obs = "Observações:"
     col_status = "Status NC"
 
-    # Converter data e limpar status
     df["Carimbo de data/hora"] = pd.to_datetime(df["Carimbo de data/hora"], errors="coerce")
     if df["Carimbo de data/hora"].isna().all():
         st.error("❌ Nenhuma data válida encontrada.")
@@ -145,7 +136,6 @@ def main():
     df["Data"] = df["Carimbo de data/hora"].dt.strftime("%d/%m/%Y")
     df[col_status] = df[col_status].fillna("").str.lower().str.strip()
 
-    # Filtros no sidebar
     st.sidebar.markdown("### 📅 Filtros")
     min_date, max_date = df["Carimbo de data/hora"].min(), df["Carimbo de data/hora"].max()
     start_date = st.sidebar.date_input("Data inicial", min_date.date())
@@ -157,21 +147,18 @@ def main():
 
     df = df[(df["Carimbo de data/hora"] >= pd.Timestamp(start_date)) & (df["Carimbo de data/hora"] <= pd.Timestamp(end_date) + pd.Timedelta(days=1))]
 
-    # Motoristas
     motoristas = sorted(df["Motorista"].dropna().unique())
     motoristas_opcoes = ["Todos"] + motoristas
     sel_motorista = st.sidebar.selectbox("Motoristas", motoristas_opcoes)
     if sel_motorista != "Todos":
         df = df[df["Motorista"] == sel_motorista]
 
-    # Placas
     placas = sorted(df["Placa do Caminhão"].dropna().unique())
     placas_opcoes = ["Todos"] + placas
     sel_placa = st.sidebar.selectbox("Placas", placas_opcoes)
     if sel_placa != "Todos":
         df = df[df["Placa do Caminhão"] == sel_placa]
 
-    # Status NC
     status_opcoes = ["Todos", "Aberto / Em andamento", "Concluído"]
     status_sel = st.sidebar.selectbox("Status da NC", status_opcoes)
 
@@ -180,31 +167,25 @@ def main():
     elif status_sel == "Concluído":
         df = df[df[col_status] == "concluído"]
 
-    # Itens de checklist (excluindo colunas obrigatórias e extras)
     cols_excluir = COLUNAS_OBRIGATORIAS + ["Data", "Km atual"]
     itens = [col for col in df.columns if col not in cols_excluir]
 
-    # Contar NCs por checklist
     df_itens = df[itens].fillna("").astype(str).applymap(lambda x: x.strip().lower())
     df["Reincidencias"] = df_itens.apply(lambda row: sum(v != "ok" and v != "" for v in row), axis=1)
 
-    # Classificação dos veículos
     df_veic_nc = df.groupby("Placa do Caminhão").agg(
         Total_NC=pd.NamedAgg(column="Reincidencias", aggfunc="sum"),
         Status_Aberto=pd.NamedAgg(column=col_status, aggfunc=lambda s: any(x in ["aberto", "em andamento"] for x in s))
     ).reset_index()
     df_veic_nc["Classificação"] = df_veic_nc.apply(lambda row: classificar_veiculo(row["Total_NC"], "aberto" if row["Status_Aberto"] else "concluído"), axis=1)
 
-    # Padronizar placas no manut para merge
     manut.columns = manut.columns.str.strip()
     if "PLACA" in manut.columns:
         manut["PLACA"] = manut["PLACA"].astype(str).str.upper().str.strip()
     df_veic_nc["Placa do Caminhão"] = df_veic_nc["Placa do Caminhão"].astype(str).str.upper().str.strip()
 
-    # Mapeamento categorias para itens
     categorias = [mapear_categoria(item) for item in itens]
 
-    # Montar df para análise por categoria
     df_cat = pd.DataFrame({
         "Item": itens,
         "Categoria": categorias,
@@ -213,7 +194,6 @@ def main():
     df_cat = df_cat[df_cat["NCs"] > 0]
     df_cat_grouped = df_cat.groupby("Categoria").sum().reset_index().sort_values("NCs", ascending=False)
 
-    # --- Abas ---
     aba1, aba2, aba3, aba4, aba5 = st.tabs([
         "📊 Visão Geral", "🛠️ Manutenção", "📌 Itens Críticos", "📝 Observações", "📸 Fotos"
     ])
@@ -325,7 +305,7 @@ def main():
 🔧 **Itens Não Conformes:** {", ".join(nc_itens)}
 """)
                 for i, link in enumerate(links, 1):
-                    st.image(link, caption=f"Foto {i}", use_column_width=True)
+                    st.image(link, caption=f"Foto {i}", use_container_width=True)
                 st.markdown("---")
 
 if __name__ == "__main__":
