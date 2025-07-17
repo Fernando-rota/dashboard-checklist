@@ -205,6 +205,45 @@ def main():
             labels={"Reincidencias": "Não Conformidades", "Placa do Caminhão": "Placa"}
         )
         st.plotly_chart(fig, use_container_width=True)
+        import io
+
+# Gerar DataFrame com KPIs
+kpi_data = pd.DataFrame({
+    "Indicador": [
+        "Veículo com Mais NCs",
+        "Checklists no Período",
+        "% de Checklists com NC",
+        "Média de NCs por Checklist",
+        "Total de Itens Verificados",
+        "% Médio de Itens NC por Checklist"
+    ],
+    "Valor": [
+        veic_top,
+        total_checklists,
+        f"{pct_checklists_com_nc}% ({checklists_com_nc} com NC)",
+        media_nc_por_checklist,
+        f"{total_itens_verificados:,}",
+        f"{media_pct_nc_por_checklist}%"
+    ]
+})
+
+# Gerar arquivo Excel em memória
+buffer = io.BytesIO()
+with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
+    kpi_data.to_excel(writer, sheet_name='Indicadores', index=False)
+    resumo.to_excel(writer, sheet_name='Resumo NCs', index=False)
+    df_veic_nc.to_excel(writer, sheet_name='Classificação Veículos', index=False)
+    df_cat_grouped.to_excel(writer, sheet_name='Itens Críticos', index=False)
+
+# Botão de download
+st.markdown("### 📥 Exportar Indicadores")
+st.download_button(
+    label="📁 Baixar Indicadores em Excel",
+    data=buffer.getvalue(),
+    file_name="indicadores_checklist.xlsx",
+    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+)
+
 
         st.markdown("### 📅 Tendência Temporal de NCs")
         agrupamento = st.selectbox("Agrupar por", ["Diário", "Semanal", "Mensal"], index=2)
