@@ -3,6 +3,7 @@ import pandas as pd
 import plotly.express as px
 import re
 from datetime import datetime
+import io
 
 st.set_page_config(page_title="Dashboard Checklist Veicular", layout="wide")
 
@@ -16,7 +17,8 @@ def load_excel(file):
 def extract_drive_links(urls_string):
     if not urls_string or pd.isna(urls_string):
         return []
-    urls = re.split(r'[,\s\n]+', str(urls_string).strip())
+    urls = re.split(r'[,
+\s]+', str(urls_string).strip())
     links = []
     for url in urls:
         match = re.search(r'/d/([a-zA-Z0-9_-]+)', url) or re.search(r'id=([a-zA-Z0-9_-]+)', url)
@@ -43,7 +45,6 @@ def classificar_veiculo(nc_total, status):
     else:
         return "✅ OK"
 
-# Mapeamento personalizado dos seus itens para categorias
 CATEGORIAS = {
     "Drenar a água acumulada": "Combustível e Filtros",
     "pré-filtro de combustivél": "Combustível e Filtros",
@@ -142,17 +143,13 @@ def main():
     df_itens = df[itens].fillna("").astype(str).applymap(lambda x: x.strip().lower())
     df["Reincidencias"] = df_itens.apply(lambda row: sum(v != "ok" and v != "" for v in row), axis=1)
 
-    # Classificação dos veículos
     df_veic_nc = df.groupby("Placa do Caminhão").agg(
         Total_NC=pd.NamedAgg(column="Reincidencias", aggfunc="sum"),
         Status_Aberto=pd.NamedAgg(column=col_status, aggfunc=lambda s: any(x in ["aberto", "em andamento"] for x in s))
     ).reset_index()
     df_veic_nc["Classificação"] = df_veic_nc.apply(lambda row: classificar_veiculo(row["Total_NC"], "aberto" if row["Status_Aberto"] else "concluído"), axis=1)
 
-    # Mapeamento categorias para itens
     categorias = [mapear_categoria(item) for item in itens]
-
-    # Montar df para análise por categoria
     df_cat = pd.DataFrame({
         "Item": itens,
         "Categoria": categorias,
@@ -161,7 +158,6 @@ def main():
     df_cat = df_cat[df_cat["NCs"] > 0]
     df_cat_grouped = df_cat.groupby("Categoria").sum().reset_index().sort_values("NCs", ascending=False)
 
-    # Aba: Criar tabs
     aba1, aba2, aba3, aba4, aba5 = st.tabs([
         "📊 Visão Geral", "🛠️ Manutenção", "📌 Itens Críticos", "📝 Observações", "📸 Fotos"
     ])
@@ -205,45 +201,6 @@ def main():
             labels={"Reincidencias": "Não Conformidades", "Placa do Caminhão": "Placa"}
         )
         st.plotly_chart(fig, use_container_width=True)
-        import io
-
-# Gerar DataFrame com KPIs
-kpi_data = pd.DataFrame({
-    "Indicador": [
-        "Veículo com Mais NCs",
-        "Checklists no Período",
-        "% de Checklists com NC",
-        "Média de NCs por Checklist",
-        "Total de Itens Verificados",
-        "% Médio de Itens NC por Checklist"
-    ],
-    "Valor": [
-        veic_top,
-        total_checklists,
-        f"{pct_checklists_com_nc}% ({checklists_com_nc} com NC)",
-        media_nc_por_checklist,
-        f"{total_itens_verificados:,}",
-        f"{media_pct_nc_por_checklist}%"
-    ]
-})
-
-# Gerar arquivo Excel em memória
-buffer = io.BytesIO()
-with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
-    kpi_data.to_excel(writer, sheet_name='Indicadores', index=False)
-    resumo.to_excel(writer, sheet_name='Resumo NCs', index=False)
-    df_veic_nc.to_excel(writer, sheet_name='Classificação Veículos', index=False)
-    df_cat_grouped.to_excel(writer, sheet_name='Itens Críticos', index=False)
-
-# Botão de download
-st.markdown("### 📥 Exportar Indicadores")
-st.download_button(
-    label="📁 Baixar Indicadores em Excel",
-    data=buffer.getvalue(),
-    file_name="indicadores_checklist.xlsx",
-    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-)
-
 
         st.markdown("### 📅 Tendência Temporal de NCs")
         agrupamento = st.selectbox("Agrupar por", ["Diário", "Semanal", "Mensal"], index=2)
@@ -257,7 +214,7 @@ st.download_button(
             df_tend["Carimbo de data/hora"] = df_tend["Carimbo de data/hora"].dt.start_time
             df_tend.rename(columns={"Carimbo de data/hora": "Data"}, inplace=True)
             xaxis_title = "Semana"
-        else:  # Mensal
+        else:
             df_tend = df.groupby(df["Carimbo de data/hora"].dt.to_period("M")).agg(Checklists_Com_NC=("Reincidencias", lambda x: (x > 0).sum())).reset_index()
             df_tend["Carimbo de data/hora"] = df_tend["Carimbo de data/hora"].dt.start_time
             df_tend.rename(columns={"Carimbo de data/hora": "Data"}, inplace=True)
@@ -268,65 +225,37 @@ st.download_button(
                            title="Tendência de Checklists com Não Conformidades")
         st.plotly_chart(fig_tend, use_container_width=True)
 
-    with aba2:
-        manut.columns = manut.columns.str.strip()
-        if "PLACA" not in manut.columns or "MANUT. PROGRAMADA" not in manut.columns:
-            st.warning("❌ Colunas 'PLACA' ou 'MANUT. PROGRAMADA' ausentes.")
-        else:
-            cruzado = pd.merge(df_veic_nc[["Placa do Caminhão", "Total_NC"]], manut, how="left", left_on="Placa do Caminhão", right_on="PLACA")
-            cruzado = cruzado.dropna(subset=["MANUT. PROGRAMADA"]).sort_values(by="Total_NC", ascending=False)
-            cruzado["Índice de Severidade"] = (
-                (cruzado["Total_NC"] / len(itens)).round(3).apply(severity_color)
-            )
-            st.markdown("### 🛠️ Manutenção Programada x NCs")
-            st.write(cruzado[["PLACA", "MODELO", "MANUT. PROGRAMADA", "Total_NC", "Índice de Severidade"]].to_html(escape=False), unsafe_allow_html=True)
+        # Exportar Indicadores
+        kpi_data = pd.DataFrame({
+            "Indicador": [
+                "Veículo com Mais NCs",
+                "Checklists no Período",
+                "% de Checklists com NC",
+                "Média de NCs por Checklist",
+                "Total de Itens Verificados",
+                "% Médio de Itens NC por Checklist"
+            ],
+            "Valor": [
+                veic_top,
+                total_checklists,
+                f"{pct_checklists_com_nc}% ({checklists_com_nc} com NC)",
+                media_nc_por_checklist,
+                f"{total_itens_verificados:,}",
+                f"{media_pct_nc_por_checklist}%"
+            ]
+        })
 
-    with aba3:
-        st.markdown("### 📌 Itens Críticos por Categoria")
-        fig_cat = px.bar(df_cat_grouped,
-                         x="NCs",
-                         y="Categoria",
-                         orientation="h",
-                         color="NCs",
-                         color_continuous_scale=["green", "yellow", "red"],
-                         labels={"NCs": "Não Conformidades", "Categoria": "Categoria"})
-        st.plotly_chart(fig_cat, use_container_width=True)
-        st.dataframe(df_cat.sort_values("NCs", ascending=False).reset_index(drop=True))
+        buffer = io.BytesIO()
+        with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
+            kpi_data.to_excel(writer, sheet_name='Indicadores', index=False)
+            resumo.to_excel(writer, sheet_name='Resumo NCs', index=False)
+            df_veic_nc.to_excel(writer, sheet_name='Classificacao Veiculos', index=False)
+            df_cat_grouped.to_excel(writer, sheet_name='Itens Criticos', index=False)
 
-    with aba4:
-        st.markdown("### 📝 Observações dos Motoristas")
-        obs = df[["Data", "Motorista", "Placa do Caminhão", col_obs, col_status]].dropna(subset=[col_obs])
-        if not obs.empty:
-            st.dataframe(obs)
-        else:
-            st.info("Nenhuma observação registrada.")
-
-    with aba5:
-        st.markdown("### 📸 Fotos de Não Conformidades")
-        fotos_df = df[["Data", "Motorista", "Placa do Caminhão", col_fotos, col_status] + itens].dropna(subset=[col_fotos])
-        placas_disp = sorted(fotos_df["Placa do Caminhão"].unique())
-        sel_foto = st.selectbox("Filtrar por Placa", ["Todas"] + placas_disp)
-
-        if sel_foto != "Todas":
-            fotos_df = fotos_df[fotos_df["Placa do Caminhão"] == sel_foto]
-
-        if fotos_df.empty:
-            st.info("Nenhuma foto encontrada.")
-        else:
-            for _, row in fotos_df.iterrows():
-                nc_itens = [col for col in itens if row[col].strip().lower() != "ok"]
-                links = extract_drive_links(row[col_fotos])
-
-                st.markdown(f"""
-**📅 {row['Data']}**  
-👨‍✈️ **Motorista:** {row['Motorista']}  
-🚚 **Placa:** {row['Placa do Caminhão']}  
-📍 **Status:** {row[col_status]}  
-🔧 **Itens Não Conformes:** {", ".join(nc_itens)}
-""")
-                for i, link in enumerate(links, 1):
-                    st.markdown(f"[🔗 Foto {i}]({link})")
-                st.markdown("---")
-
-if __name__ == "__main__":
-    main()
+        st.markdown("### 📥 Exportar Indicadores")
+        st.download_button(
+            label="📁 Baixar Indicadores em Excel",
+            data=buffer.getvalue(),
+            file_name="indicadores_checklist.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
