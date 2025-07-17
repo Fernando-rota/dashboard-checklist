@@ -113,16 +113,22 @@ if file_checklist and file_manu:
 
     with tab3:
         st.subheader("📷 Fotos das Não Conformidades por Veículo")
-        placas = df_nc['Placa'].dropna().unique()
+        placas = df_nc['Placa'].dropna().unique().tolist()
+        placas.insert(0, 'Todos')
         placa_selecionada = st.selectbox("Selecionar Placa", sorted(placas))
 
-        fotos_placa = df_nc[df_nc['Placa'] == placa_selecionada]
+        if placa_selecionada == 'Todos':
+            fotos_placa = df_nc.copy()
+        else:
+            fotos_placa = df_nc[df_nc['Placa'] == placa_selecionada]
+
         for _, row in fotos_placa.iterrows():
             st.markdown(f"**Data:** {row['Data']}  ")
+            st.markdown(f"**Placa:** {row['Placa']}  ")
             st.markdown(f"**Item:** {row['Item']}  ")
             st.markdown(f"**Descrição:** {row['Descrição Problema']}")
 
-            urls = re.split(r',\s*', row['foto']) if pd.notna(row['foto']) else []
+            urls = re.split(r',\s*', str(row['foto'])) if pd.notna(row['foto']) else []
             for url in urls:
                 st.image(url, use_container_width=True)
 
