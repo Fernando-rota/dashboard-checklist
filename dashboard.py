@@ -1,150 +1,293 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-from datetime import datetime
 import re
-from io import BytesIO
+from datetime import datetime
 
-st.set_page_config(page_title="Painel de Não Conformidades", layout="wide")
+st.set_page_config(page_title="Dashboard Checklist Veicular", layout="wide")
 
-st.title("✅ Painel de Não Conformidades - Checklist Veicular")
+@st.cache_data
+def load_excel(file):
+    df = pd.read_excel(file)
+    df.columns = df.columns.str.strip().str.replace('\s+', ' ', regex=True)
+    df = df.loc[:, ~df.columns.str.contains('^Unnamed')]
+    return df
 
-# Função para extrair links do campo de fotos
-def extract_drive_links(text):
-    return re.findall(r"https://drive.google.com/[^\s,]+", str(text))
+def extract_drive_links(urls_string):
+    if not urls_string or pd.isna(urls_string):
+        return []
+    urls = re.split(r'[,\s\n]+', str(urls_string).strip())
+    links = []
+    for url in urls:
+        match = re.search(r'/d/([a-zA-Z0-9_-]+)', url) or re.search(r'id=([a-zA-Z0-9_-]+)', url)
+        if match:
+            file_id = match.group(1)
+            links.append(f"https://drive.google.com/uc?export=view&id={file_id}")
+        else:
+            links.append(url)
+    return links
 
-# Upload do arquivo
-uploaded_file = st.sidebar.file_uploader("📤 Envie o arquivo de checklist (.xlsx ou .xls)", type=["xlsx", "xls"])
+def severity_color(val):
+    if val <= 0.1:
+        return f'<span style="color:#2ecc71;font-weight:bold;">{val:.3f}</span>'
+    elif val <= 0.3:
+        return f'<span style="color:#f1c40f;font-weight:bold;">{val:.3f}</span>'
+    else:
+        return f'<span style="color:#e74c3c;font-weight:bold;">{val:.3f}</span>'
 
-if uploaded_file:
-    df = pd.read_excel(uploaded_file)
+def classificar_veiculo(nc_total, status):
+    if status in ["aberto", "em andamento"] or nc_total > 5:
+        return "🚫 Crítico"
+    elif 2 <= nc_total <= 5:
+        return "⚠️ Atenção"
+    else:
+        return "✅ OK"
 
-    # Normaliza colunas e identifica colunas-chave
-    df.columns = df.columns.str.strip()
-    col_data = [col for col in df.columns if "data" in col.lower()][0]
-    col_motorista = [col for col in df.columns if "motorista" in col.lower()][0]
-    col_placa = [col for col in df.columns if "placa" in col.lower() and "caminh" in col.lower()][0]
-    col_status = [col for col in df.columns if "status" in col.lower() and "nc" in col.lower()][0]
-    col_fotos = [col for col in df.columns if "foto" in col.lower()][0]
+# Mapeamento personalizado dos seus itens para categorias
+CATEGORIAS = {
+    "Drenar a água acumulada": "Combustível e Filtros",
+    "pré-filtro de combustivél": "Combustível e Filtros",
+    "pneus": "Pneus",
+    "estepe": "Pneus",
+    "vazamentos": "Vazamentos e Fluídos",
+    "níveis (água, óleo, fluidos": "Vazamentos e Fluídos",
+    "faróis": "Iluminação",
+    "lanternas": "Iluminação",
+    "luzes indicadoras": "Iluminação",
+    "luz de freio": "Iluminação",
+    "luz de marcha": "Iluminação",
+    "vidros": "Vidros e Retrovisores",
+    "espelhos retrovisores": "Vidros e Retrovisores",
+    "trincos": "Segurança",
+    "fechaduras": "Segurança",
+    "nível de fluido do sistema de freio": "Freios",
+    "direção hidráulica": "Direção",
+    "embreagem": "Embreagem",
+    "reservatório do lavador": "Sistema de Limpeza",
+    "funcionamento do limpador": "Sistema de Limpeza",
+    "pressão pneumática do sistema de freios": "Freios",
+    "funcionamento do tacógrafo": "Eletrônica",
+    "funcionamento do alarme sonoro": "Eletrônica",
+    "luzes de advertência": "Eletrônica",
+    "abastecimento de combustível": "Combustível e Filtros",
+}
 
-    df[col_data] = pd.to_datetime(df[col_data], errors='coerce')
-    df = df.dropna(subset=[col_data])
+def mapear_categoria(item):
+    for chave, cat in CATEGORIAS.items():
+        if chave.lower() in item.lower():
+            return cat
+    return "Outros"
 
-    # Itens de verificação = colunas entre "Motorista" e "Status NC"
-    idx_motorista = df.columns.get_loc(col_motorista)
-    idx_status = df.columns.get_loc(col_status)
-    itens = df.columns[(idx_motorista + 1):idx_status]
+def main():
+    st.title("🚛 Dashboard Checklist Veicular")
 
-    # Filtros
-    with st.sidebar:
-        st.markdown("### 🎯 Filtros")
-        data_ini = st.date_input("Data inicial", value=df[col_data].min().date())
-        data_fim = st.date_input("Data final", value=df[col_data].max().date())
-        motoristas = sorted(df[col_motorista].dropna().unique())
-        placas = sorted(df[col_placa].dropna().unique())
-        status_nc = sorted(df[col_status].dropna().unique())
+    checklist_file = st.file_uploader("📁 Checklist Excel", type="xlsx")
+    manut_file = st.file_uploader("📁 MANU.PREVENT Excel", type="xlsx")
+    if not checklist_file or not manut_file:
+        st.info("📌 Envie os dois arquivos para continuar.")
+        return
 
-        sel_motorista = st.multiselect("Motorista", motoristas, default=motoristas)
-        sel_placa = st.multiselect("Placa do Caminhão", placas, default=placas)
-        sel_status = st.multiselect("Status NC", status_nc, default=status_nc)
+    with st.spinner("🔄 Carregando dados..."):
+        df = load_excel(checklist_file)
+        manut = load_excel(manut_file)
 
-    # Aplica filtros
-    df_filtrado = df[
-        (df[col_data] >= pd.to_datetime(data_ini)) &
-        (df[col_data] <= pd.to_datetime(data_fim)) &
-        (df[col_motorista].isin(sel_motorista)) &
-        (df[col_placa].isin(sel_placa)) &
-        (df[col_status].isin(sel_status))
-    ]
+    col_fotos = "Anexe as fotos das não conformidades:"
+    col_obs = "Observações:"
+    col_status = "Status NC"
+    obrigatorias = ["Carimbo de data/hora", "Motorista", "Placa do Caminhão", "Pontuação", col_fotos, col_obs, col_status]
 
-    aba1, aba2, aba3, aba4, aba5, aba6 = st.tabs([
-        "📊 Visão Geral",
-        "📌 Itens Críticos",
-        "📋 Checklist Completo",
-        "📁 Checklist Filtrado",
-        "📸 Fotos de NC",
-        "⬇️ Exportar Dados"
+    if any(col not in df.columns for col in obrigatorias):
+        st.error(f"❌ Colunas obrigatórias ausentes: {[c for c in obrigatorias if c not in df.columns]}")
+        return
+
+    df["Carimbo de data/hora"] = pd.to_datetime(df["Carimbo de data/hora"], errors="coerce")
+    if df["Carimbo de data/hora"].isna().all():
+        st.error("❌ Nenhuma data válida encontrada.")
+        return
+
+    df["Data"] = df["Carimbo de data/hora"].dt.strftime("%d/%m/%Y")
+    df[col_status] = df[col_status].fillna("").str.lower().str.strip()
+
+    st.sidebar.markdown("### 📅 Filtros")
+    min_date, max_date = df["Carimbo de data/hora"].min(), df["Carimbo de data/hora"].max()
+    start_date = st.sidebar.date_input("Data inicial", min_date.date())
+    end_date = st.sidebar.date_input("Data final", max_date.date())
+
+    if start_date > end_date:
+        st.sidebar.error("Data inicial não pode ser maior que a final.")
+        return
+
+    df = df[(df["Carimbo de data/hora"] >= pd.Timestamp(start_date)) &
+            (df["Carimbo de data/hora"] <= pd.Timestamp(end_date) + pd.Timedelta(days=1))]
+
+    motoristas = sorted(df["Motorista"].dropna().unique())
+    placas = sorted(df["Placa do Caminhão"].dropna().unique())
+    sel_motorista = st.sidebar.multiselect("Motoristas", motoristas, default=motoristas)
+    sel_placa = st.sidebar.multiselect("Placas", placas, default=placas)
+
+    df = df[df["Motorista"].isin(sel_motorista)]
+    df = df[df["Placa do Caminhão"].isin(sel_placa)]
+
+    status_opcoes = ["Todos", "Aberto / Em andamento", "Concluído"]
+    status_sel = st.sidebar.selectbox("Status da NC", status_opcoes)
+
+    if status_sel == "Aberto / Em andamento":
+        df = df[df[col_status].isin(["aberto", "em andamento"])]
+    elif status_sel == "Concluído":
+        df = df[df[col_status] == "concluído"]
+
+    cols_excluir = obrigatorias + ["Data", "Km atual"]
+    itens = [col for col in df.columns if col not in cols_excluir]
+
+    df_itens = df[itens].fillna("").astype(str).applymap(lambda x: x.strip().lower())
+    df["Reincidencias"] = df_itens.apply(lambda row: sum(v != "ok" and v != "" for v in row), axis=1)
+
+    # Classificação dos veículos
+    df_veic_nc = df.groupby("Placa do Caminhão").agg(
+        Total_NC=pd.NamedAgg(column="Reincidencias", aggfunc="sum"),
+        Status_Aberto=pd.NamedAgg(column=col_status, aggfunc=lambda s: any(x in ["aberto", "em andamento"] for x in s))
+    ).reset_index()
+    df_veic_nc["Classificação"] = df_veic_nc.apply(lambda row: classificar_veiculo(row["Total_NC"], "aberto" if row["Status_Aberto"] else "concluído"), axis=1)
+
+    # Mapeamento categorias para itens
+    categorias = [mapear_categoria(item) for item in itens]
+
+    # Montar df para análise por categoria
+    df_cat = pd.DataFrame({
+        "Item": itens,
+        "Categoria": categorias,
+        "NCs": [df_itens[col].ne("ok").sum() for col in itens]
+    })
+    df_cat = df_cat[df_cat["NCs"] > 0]
+    df_cat_grouped = df_cat.groupby("Categoria").sum().reset_index().sort_values("NCs", ascending=False)
+
+    # Aba: Criar tabs
+    aba1, aba2, aba3, aba4, aba5 = st.tabs([
+        "📊 Visão Geral", "🛠️ Manutenção", "📌 Itens Críticos", "📝 Observações", "📸 Fotos"
     ])
 
     with aba1:
-        st.markdown("### 📊 Gráficos de Não Conformidades")
+        st.markdown("### 🔢 Indicadores")
 
-        df_nc = df_filtrado.copy()
-        df_nc["qtd_nc"] = df_nc[itens].apply(lambda row: sum(str(x).strip().lower() != "ok" for x in row), axis=1)
-        nc_por_placa = df_nc.groupby(col_placa)["qtd_nc"].sum().reset_index().sort_values("qtd_nc", ascending=False)
+        resumo = df.groupby("Placa do Caminhão")["Reincidencias"].sum().reset_index()
+        veic_top = resumo.loc[resumo["Reincidencias"].idxmax(), "Placa do Caminhão"] if not resumo.empty else "N/A"
+        total_nc = resumo["Reincidencias"].max() if not resumo.empty else 0
+        total_checklists = len(df)
+        checklists_com_nc = df["Reincidencias"].gt(0).sum()
+        pct_checklists_com_nc = round((checklists_com_nc / total_checklists) * 100, 1) if total_checklists > 0 else 0
+        media_nc_por_checklist = round(df["Reincidencias"].mean(), 2)
+        total_itens_verificados = total_checklists * len(itens)
+        media_pct_nc_por_checklist = round((df["Reincidencias"] / len(itens)).mean() * 100, 1)
 
-        fig1 = px.bar(nc_por_placa, x="qtd_nc", y=col_placa, orientation="h", title="Total de Não Conformidades por Veículo")
-        st.plotly_chart(fig1, use_container_width=True)
+        kpi1, kpi2 = st.columns(2)
+        kpi1.metric("🚛 Veículo com Mais NCs", veic_top, f"{int(total_nc)} ocorrências")
+        kpi2.metric("📋 Checklists no Período", total_checklists)
 
-        nc_por_data = df_nc.groupby(col_data)["qtd_nc"].sum().reset_index()
-        fig2 = px.line(nc_por_data, x=col_data, y="qtd_nc", markers=True, title="Tendência de Não Conformidades ao longo do tempo")
-        st.plotly_chart(fig2, use_container_width=True)
+        kpi3, kpi4 = st.columns(2)
+        kpi3.metric("📉 % de Checklists com NC", f"{pct_checklists_com_nc}%", f"{checklists_com_nc} com NC")
+        kpi4.metric("⚠️ Média de NCs por Checklist", media_nc_por_checklist)
 
-        status_count = df_filtrado[col_status].value_counts().reset_index()
-        status_count.columns = ["Status", "Quantidade"]
-        fig3 = px.pie(status_count, names="Status", values="Quantidade", title="Distribuição por Status")
-        st.plotly_chart(fig3, use_container_width=True)
+        kpi5, kpi6 = st.columns(2)
+        kpi5.metric("🧾 Total de Itens Verificados", f"{total_itens_verificados:,}")
+        kpi6.metric("🔧 % Médio de Itens NC por Checklist", f"{media_pct_nc_por_checklist}%")
 
-        df_nc["dia_semana"] = df_nc[col_data].dt.day_name()
-        heatmap_data = df_nc.groupby(["dia_semana", col_placa])["qtd_nc"].sum().reset_index()
-        heatmap_pivot = heatmap_data.pivot(index="dia_semana", columns=col_placa, values="qtd_nc").fillna(0)
-        fig4 = px.imshow(heatmap_pivot, text_auto=True, aspect="auto", title="Frequência de NCs por Dia e Veículo")
-        st.plotly_chart(fig4, use_container_width=True)
+        st.markdown("### 🏷️ Classificação dos Veículos")
+        st.dataframe(df_veic_nc[["Placa do Caminhão", "Total_NC", "Classificação"]].sort_values("Total_NC", ascending=False).reset_index(drop=True))
+
+        st.markdown("### 📉 NCs por Veículo")
+        fig = px.bar(
+            resumo.sort_values("Reincidencias"),
+            x="Reincidencias",
+            y="Placa do Caminhão",
+            color="Reincidencias",
+            orientation="h",
+            color_continuous_scale=["green", "yellow", "red"],
+            labels={"Reincidencias": "Não Conformidades", "Placa do Caminhão": "Placa"}
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+        st.markdown("### 📅 Tendência Temporal de NCs")
+        agrupamento = st.selectbox("Agrupar por", ["Diário", "Semanal", "Mensal"], index=2)
+
+        if agrupamento == "Diário":
+            df_tend = df.groupby(df["Carimbo de data/hora"].dt.date).agg(Checklists_Com_NC=("Reincidencias", lambda x: (x > 0).sum())).reset_index()
+            df_tend.rename(columns={"Carimbo de data/hora": "Data"}, inplace=True)
+            xaxis_title = "Data"
+        elif agrupamento == "Semanal":
+            df_tend = df.groupby(df["Carimbo de data/hora"].dt.to_period("W")).agg(Checklists_Com_NC=("Reincidencias", lambda x: (x > 0).sum())).reset_index()
+            df_tend["Carimbo de data/hora"] = df_tend["Carimbo de data/hora"].dt.start_time
+            df_tend.rename(columns={"Carimbo de data/hora": "Data"}, inplace=True)
+            xaxis_title = "Semana"
+        else:  # Mensal
+            df_tend = df.groupby(df["Carimbo de data/hora"].dt.to_period("M")).agg(Checklists_Com_NC=("Reincidencias", lambda x: (x > 0).sum())).reset_index()
+            df_tend["Carimbo de data/hora"] = df_tend["Carimbo de data/hora"].dt.start_time
+            df_tend.rename(columns={"Carimbo de data/hora": "Data"}, inplace=True)
+            xaxis_title = "Mês"
+
+        fig_tend = px.line(df_tend, x="Data", y="Checklists_Com_NC", markers=True,
+                           labels={"Checklists_Com_NC": "Checklists com NC", "Data": xaxis_title},
+                           title="Tendência de Checklists com Não Conformidades")
+        st.plotly_chart(fig_tend, use_container_width=True)
 
     with aba2:
-        st.markdown("### 📌 Itens com Mais Não Conformidades")
-        item_counts = {}
-        for item in itens:
-            item_counts[item] = (df_filtrado[item].astype(str).str.lower() != "ok").sum()
-        item_series = pd.Series(item_counts).sort_values(ascending=False)
-        item_df = item_series.reset_index()
-        item_df.columns = ["Item", "Não Conformidades"]
-
-        fig5 = px.bar(item_df, x="Não Conformidades", y="Item", orientation="h", title="Frequência de NC por Item")
-        st.plotly_chart(fig5, use_container_width=True)
-
-        fig6 = px.treemap(item_df, path=["Item"], values="Não Conformidades", title="Treemap de Itens com NC")
-        st.plotly_chart(fig6, use_container_width=True)
+        manut.columns = manut.columns.str.strip()
+        if "PLACA" not in manut.columns or "MANUT. PROGRAMADA" not in manut.columns:
+            st.warning("❌ Colunas 'PLACA' ou 'MANUT. PROGRAMADA' ausentes.")
+        else:
+            cruzado = pd.merge(df_veic_nc[["Placa do Caminhão", "Total_NC"]], manut, how="left", left_on="Placa do Caminhão", right_on="PLACA")
+            cruzado = cruzado.dropna(subset=["MANUT. PROGRAMADA"]).sort_values(by="Total_NC", ascending=False)
+            cruzado["Índice de Severidade"] = (
+                (cruzado["Total_NC"] / len(itens)).round(3).apply(severity_color)
+            )
+            st.markdown("### 🛠️ Manutenção Programada x NCs")
+            st.write(cruzado[["PLACA", "MODELO", "MANUT. PROGRAMADA", "Total_NC", "Índice de Severidade"]].to_html(escape=False), unsafe_allow_html=True)
 
     with aba3:
-        st.markdown("### 📋 Base Completa - Checklist (sem filtro)")
-        st.dataframe(df, use_container_width=True)
+        st.markdown("### 📌 Itens Críticos por Categoria")
+        fig_cat = px.bar(df_cat_grouped,
+                         x="NCs",
+                         y="Categoria",
+                         orientation="h",
+                         color="NCs",
+                         color_continuous_scale=["green", "yellow", "red"],
+                         labels={"NCs": "Não Conformidades", "Categoria": "Categoria"})
+        st.plotly_chart(fig_cat, use_container_width=True)
+        st.dataframe(df_cat.sort_values("NCs", ascending=False).reset_index(drop=True))
 
     with aba4:
-        st.markdown("### 📋 Checklist com Filtros Aplicados")
-        st.dataframe(df_filtrado, use_container_width=True)
+        st.markdown("### 📝 Observações dos Motoristas")
+        obs = df[["Data", "Motorista", "Placa do Caminhão", col_obs, col_status]].dropna(subset=[col_obs])
+        if not obs.empty:
+            st.dataframe(obs)
+        else:
+            st.info("Nenhuma observação registrada.")
 
     with aba5:
         st.markdown("### 📸 Fotos de Não Conformidades")
-        fotos_df = df[[col_data, col_motorista, col_placa, col_fotos, col_status] + list(itens)].dropna(subset=[col_fotos])
-        placas_disp = sorted(fotos_df[col_placa].unique())
+        fotos_df = df[["Data", "Motorista", "Placa do Caminhão", col_fotos, col_status] + itens].dropna(subset=[col_fotos])
+        placas_disp = sorted(fotos_df["Placa do Caminhão"].unique())
         sel_foto = st.selectbox("Filtrar por Placa", ["Todas"] + placas_disp)
 
         if sel_foto != "Todas":
-            fotos_df = fotos_df[fotos_df[col_placa] == sel_foto]
+            fotos_df = fotos_df[fotos_df["Placa do Caminhão"] == sel_foto]
 
         if fotos_df.empty:
             st.info("Nenhuma foto encontrada.")
         else:
             for _, row in fotos_df.iterrows():
-                nc_itens = [col for col in itens if str(row[col]).strip().lower() != "ok"]
+                nc_itens = [col for col in itens if row[col].strip().lower() != "ok"]
                 links = extract_drive_links(row[col_fotos])
 
                 st.markdown(f"""
-**📅 {row[col_data].date()}**  
-👨‍✈️ **Motorista:** {row[col_motorista]}  
-🚚 **Placa:** {row[col_placa]}  
+**📅 {row['Data']}**  
+👨‍✈️ **Motorista:** {row['Motorista']}  
+🚚 **Placa:** {row['Placa do Caminhão']}  
 📍 **Status:** {row[col_status]}  
-🔧 **Itens Não Conformes:** {', '.join(nc_itens)}
+🔧 **Itens Não Conformes:** {", ".join(nc_itens)}
 """)
                 for i, link in enumerate(links, 1):
                     st.markdown(f"[🔗 Foto {i}]({link})")
                 st.markdown("---")
 
-    with aba6:
-        st.markdown("### ⬇️ Exportar Dados Filtrados")
-        buffer = BytesIO()
-        df_filtrado.to_excel(buffer, index=False)
-        st.download_button("📥 Baixar Checklist Filtrado (Excel)", data=buffer.getvalue(), file_name="checklist_filtrado.xlsx")
-else:
-    st.info("Envie o arquivo de checklist no menu lateral para começar.")
+if __name__ == "__main__":
+    main()
