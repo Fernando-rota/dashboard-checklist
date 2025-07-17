@@ -21,19 +21,13 @@ if file_checklist and file_manu:
 
     df = df.rename(columns=lambda x: x.strip())
 
-    # Identificar a coluna 'Placa' mesmo que esteja com nome diferente
-    placa_col = None
-    for col in df.columns:
-        if col.strip().lower() == 'placa':
-            placa_col = col
-            break
-
-    if not placa_col:
-        st.error("❌ A coluna 'Placa' não foi encontrada. Verifique se ela está corretamente nomeada.")
-        st.write("Colunas encontradas:", df.columns.tolist())
+    # ✅ Ajuste fixo para a coluna "Placa do caminhão"
+    if 'Placa do caminhão' not in df.columns:
+        st.error("❌ A coluna 'Placa do caminhão' não foi encontrada. Verifique se está correta.")
+        st.write("Colunas disponíveis:", df.columns.tolist())
         st.stop()
-
-    df = df.rename(columns={placa_col: 'Placa'})
+    
+    df = df.rename(columns={'Placa do caminhão': 'Placa'})
 
     df['Data'] = pd.to_datetime(df['Data'], errors='coerce').dt.date
     df['Placa'] = df['Placa'].astype(str).str.strip().str.upper()
@@ -60,7 +54,6 @@ if file_checklist and file_manu:
 
     with tab1:
         col1, col2, col3 = st.columns(3)
-
         col1.metric("🚛 Veículo com Mais NCs", veic_top)
         col2.metric("📋 Checklists no Período", total_checklists)
         col3.metric("📉 % de Checklists com NC", f"{pct_checklists_com_nc}%\n{checklists_com_nc} com NC")
@@ -117,7 +110,7 @@ if file_checklist and file_manu:
     with tab3:
         st.subheader("📷 Fotos das Não Conformidades por Veículo")
         placas = df_nc['Placa'].dropna().unique().tolist()
-        placas.insert(0, 'Todos')  # ✅ Adiciona a opção "Todos"
+        placas.insert(0, 'Todos')
         placa_selecionada = st.selectbox("Selecionar Placa", sorted(placas))
 
         if placa_selecionada == 'Todos':
