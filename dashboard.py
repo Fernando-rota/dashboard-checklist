@@ -17,8 +17,23 @@ if file_checklist and file_manu:
     frota = pd.read_excel(file_manu)
 
     df = df.rename(columns=lambda x: x.strip())
-    df['Data'] = pd.to_datetime(df['Data']).dt.date
-    df['Placa'] = df['Placa'].str.strip().str.upper()
+
+    # Identificar a coluna 'Placa' mesmo que esteja com nome diferente
+    placa_col = None
+    for col in df.columns:
+        if col.strip().lower() == 'placa':
+            placa_col = col
+            break
+
+    if not placa_col:
+        st.error("❌ A coluna 'Placa' não foi encontrada. Verifique se ela está corretamente nomeada.")
+        st.write("Colunas encontradas:", df.columns.tolist())
+        st.stop()
+
+    df = df.rename(columns={placa_col: 'Placa'})
+
+    df['Data'] = pd.to_datetime(df['Data'], errors='coerce').dt.date
+    df['Placa'] = df['Placa'].astype(str).str.strip().str.upper()
 
     resumo = df.groupby('Placa').agg(
         Checklists=('Data', 'count'),
