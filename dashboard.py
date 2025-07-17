@@ -9,8 +9,11 @@ st.set_page_config(layout="wide")
 st.title("🚛 Painel de Não Conformidades - Checklist Veicular")
 
 st.sidebar.markdown("### 📂 Importar arquivos")
-file_checklist = st.sidebar.file_uploader("Checklist preenchido", type=[".xlsx"])
-file_manu = st.sidebar.file_uploader("Planilha de frota (MANU.PREVENT)", type=[".xlsx"])
+
+# Botão de upload mais compacto
+with st.sidebar:
+    file_checklist = st.file_uploader("Checklist preenchido", type=[".xlsx"], label_visibility="collapsed")
+    file_manu = st.file_uploader("Planilha de frota (MANU.PREVENT)", type=[".xlsx"], label_visibility="collapsed")
 
 if file_checklist and file_manu:
     df = pd.read_excel(file_checklist)
@@ -114,7 +117,7 @@ if file_checklist and file_manu:
     with tab3:
         st.subheader("📷 Fotos das Não Conformidades por Veículo")
         placas = df_nc['Placa'].dropna().unique().tolist()
-        placas.insert(0, 'Todos')
+        placas.insert(0, 'Todos')  # ✅ Adiciona a opção "Todos"
         placa_selecionada = st.selectbox("Selecionar Placa", sorted(placas))
 
         if placa_selecionada == 'Todos':
