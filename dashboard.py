@@ -16,7 +16,7 @@ def load_excel(file):
 def extract_drive_links(urls_string):
     if not urls_string or pd.isna(urls_string):
         return []
-    urls = re.split(r'[,\s\n]+', str(urls_string).strip())
+    urls = re.split(r'[,\\s]+', str(urls_string).strip())
     links = []
     for url in urls:
         match = re.search(r'/d/([a-zA-Z0-9_-]+)', url) or re.search(r'id=([a-zA-Z0-9_-]+)', url)
@@ -80,7 +80,6 @@ def mapear_categoria(item):
 def main():
     st.title("🚛 Dashboard Checklist Veicular")
 
-    # Uploaders lado a lado, menores e sem label visível
     col1, col2 = st.columns(2)
     with col1:
         checklist_file = st.file_uploader("📁 Checklist Excel", type="xlsx", label_visibility="collapsed")
@@ -172,7 +171,6 @@ def main():
     df_cat = df_cat[df_cat["NCs"] > 0]
     df_cat_grouped = df_cat.groupby("Categoria").sum().reset_index().sort_values("NCs", ascending=False)
 
-    # Abas do dashboard
     aba1, aba2, aba3, aba4, aba5 = st.tabs([
         "📊 Visão Geral", "🛠️ Manutenção", "📌 Itens Críticos", "📝 Observações", "📸 Fotos"
     ])
@@ -295,7 +293,7 @@ def main():
                 cols = st.columns(3)
                 for i, link in enumerate(links):
                     with cols[i % 3]:
-                        st.image(link, use_column_width=True)
+                        st.image(link, use_container_width=True)
                 st.markdown("---")
 
 if __name__ == "__main__":
