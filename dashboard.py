@@ -7,8 +7,8 @@ from datetime import datetime
 st.set_page_config(page_title="Dashboard Checklist Veicular", layout="wide")
 
 @st.cache_data
-def load_excel(file):
-    df = pd.read_excel(file)
+def load_excel(file, usecols=None):
+    df = pd.read_excel(file, usecols=usecols)
     df.columns = df.columns.str.strip().str.replace('\s+', ' ', regex=True)
     df = df.loc[:, ~df.columns.str.contains('^Unnamed')]
     return df
@@ -43,7 +43,6 @@ def classificar_veiculo(nc_total, status):
     else:
         return "✅ OK"
 
-# Mapeamento personalizado dos seus itens para categorias
 CATEGORIAS = {
     "Drenar a água acumulada": "Combustível e Filtros",
     "pré-filtro de combustivél": "Combustível e Filtros",
@@ -81,6 +80,22 @@ def mapear_categoria(item):
 def main():
     st.title("🚛 Dashboard Checklist Veicular")
 
+    col_fotos = "Anexe as fotos das não conformidades:"
+    col_obs = "Observações:"
+    col_status = "Status NC"
+    obrigatorias = ["Carimbo de data/hora", "Motorista", "Placa do Caminhão", "Pontuação", col_fotos, col_obs, col_status]
+
+    # Definir colunas essenciais para checklist e manutenção
+    colunas_checklist = obrigatorias.copy()
+    # Aqui adiciona todos os itens que você queira carregar no checklist (exemplo: outras colunas além das obrigatórias)
+    # Para carregar todas as colunas exceto "Unnamed" no checklist, se quiser, só coloque None abaixo.
+    # Se quiser carregar só colunas específicas, liste-as aqui, por exemplo:
+    # colunas_checklist += ["item1", "item2", ...]
+    # Como alternativa, deixo None para carregar todas (menos Unnamed):
+    colunas_checklist = None
+
+    colunas_manut = ["PLACA", "MODELO", "MANUT. PROGRAMADA"]
+
     checklist_file = st.file_uploader("📁 Checklist Excel", type="xlsx")
     manut_file = st.file_uploader("📁 MANU.PREVENT Excel", type="xlsx")
     if not checklist_file or not manut_file:
@@ -88,13 +103,8 @@ def main():
         return
 
     with st.spinner("🔄 Carregando dados..."):
-        df = load_excel(checklist_file)
-        manut = load_excel(manut_file)
-
-    col_fotos = "Anexe as fotos das não conformidades:"
-    col_obs = "Observações:"
-    col_status = "Status NC"
-    obrigatorias = ["Carimbo de data/hora", "Motorista", "Placa do Caminhão", "Pontuação", col_fotos, col_obs, col_status]
+        df = load_excel(checklist_file, usecols=colunas_checklist)
+        manut = load_excel(manut_file, usecols=colunas_manut)
 
     if any(col not in df.columns for col in obrigatorias):
         st.error(f"❌ Colunas obrigatórias ausentes: {[c for c in obrigatorias if c not in df.columns]}")
@@ -117,34 +127,16 @@ def main():
         st.sidebar.error("Data inicial não pode ser maior que a final.")
         return
 
-    df = df[(df["Carimbo de data/hora"] >= pd.Timestamp(start_date)) & (df["Carimbo de data/hora"] <= pd.Timestamp(end_date) + pd.Timedelta(days=1))]
+    df = df[(df["Carimbo de data/hora"] >= pd.Timestamp(start_date)) &
+            (df["Carimbo de data/hora"] <= pd.Timestamp(end_date) + pd.Timedelta(days=1))]
 
-    # --- FILTRO MOTORISTAS ---
     motoristas = sorted(df["Motorista"].dropna().unique())
-    todos_motoristas = st.sidebar.checkbox("Selecionar todos os motoristas", value=True)
-    if todos_motoristas:
-        sel_motorista = motoristas
-    else:
-        sel_motorista = st.sidebar.multiselect("Motoristas", motoristas)
-
-    # --- FILTRO PLACAS ---
     placas = sorted(df["Placa do Caminhão"].dropna().unique())
-    todas_placas = st.sidebar.checkbox("Selecionar todas as placas", value=True)
-    if todas_placas:
-        sel_placa = placas
-    else:
-        sel_placa = st.sidebar.multiselect("Placas", placas)
+    sel_motorista = st.sidebar.multiselect("Motoristas", motoristas, default=motoristas)
+    sel_placa = st.sidebar.multiselect("Placas", placas, default=placas)
 
-    # Aplicar filtro
-    if todos_motoristas:
-        df = df[df["Motorista"].isin(motoristas)]
-    else:
-        df = df[df["Motorista"].isin(sel_motorista)]
-
-    if todas_placas:
-        df = df[df["Placa do Caminhão"].isin(placas)]
-    else:
-        df = df[df["Placa do Caminhão"].isin(sel_placa)]
+    df = df[df["Motorista"].isin(sel_motorista)]
+    df = df[df["Placa do Caminhão"].isin(sel_placa)]
 
     status_opcoes = ["Todos", "Aberto / Em andamento", "Concluído"]
     status_sel = st.sidebar.selectbox("Status da NC", status_opcoes)
@@ -160,17 +152,14 @@ def main():
     df_itens = df[itens].fillna("").astype(str).applymap(lambda x: x.strip().lower())
     df["Reincidencias"] = df_itens.apply(lambda row: sum(v != "ok" and v != "" for v in row), axis=1)
 
-    # Classificação dos veículos
     df_veic_nc = df.groupby("Placa do Caminhão").agg(
         Total_NC=pd.NamedAgg(column="Reincidencias", aggfunc="sum"),
         Status_Aberto=pd.NamedAgg(column=col_status, aggfunc=lambda s: any(x in ["aberto", "em andamento"] for x in s))
     ).reset_index()
     df_veic_nc["Classificação"] = df_veic_nc.apply(lambda row: classificar_veiculo(row["Total_NC"], "aberto" if row["Status_Aberto"] else "concluído"), axis=1)
 
-    # Mapeamento categorias para itens
     categorias = [mapear_categoria(item) for item in itens]
 
-    # Montar df para análise por categoria
     df_cat = pd.DataFrame({
         "Item": itens,
         "Categoria": categorias,
@@ -179,7 +168,6 @@ def main():
     df_cat = df_cat[df_cat["NCs"] > 0]
     df_cat_grouped = df_cat.groupby("Categoria").sum().reset_index().sort_values("NCs", ascending=False)
 
-    # Aba: Criar tabs
     aba1, aba2, aba3, aba4, aba5 = st.tabs([
         "📊 Visão Geral", "🛠️ Manutenção", "📌 Itens Críticos", "📝 Observações", "📸 Fotos"
     ])
