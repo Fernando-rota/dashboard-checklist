@@ -43,6 +43,7 @@ def classificar_veiculo(nc_total, status):
     else:
         return "✅ OK"
 
+# Mapeamento personalizado dos seus itens para categorias
 CATEGORIAS = {
     "Drenar a água acumulada": "Combustível e Filtros",
     "pré-filtro de combustivél": "Combustível e Filtros",
@@ -80,10 +81,8 @@ def mapear_categoria(item):
 def main():
     st.title("🚛 Dashboard Checklist Veicular")
 
-    with st.sidebar.expander("📂 Upload de arquivos", expanded=False):
-        checklist_file = st.file_uploader("Checklist Excel (.xlsx)", type="xlsx")
-        manut_file = st.file_uploader("MANU.PREVENT Excel (.xlsx)", type="xlsx")
-
+    checklist_file = st.file_uploader("📁 Checklist Excel", type="xlsx")
+    manut_file = st.file_uploader("📁 MANU.PREVENT Excel", type="xlsx")
     if not checklist_file or not manut_file:
         st.info("📌 Envie os dois arquivos para continuar.")
         return
@@ -120,16 +119,32 @@ def main():
 
     df = df[(df["Carimbo de data/hora"] >= pd.Timestamp(start_date)) & (df["Carimbo de data/hora"] <= pd.Timestamp(end_date) + pd.Timedelta(days=1))]
 
+    # --- FILTRO MOTORISTAS ---
     motoristas = sorted(df["Motorista"].dropna().unique())
     todos_motoristas = st.sidebar.checkbox("Selecionar todos os motoristas", value=True)
-    sel_motorista = motoristas if todos_motoristas else st.sidebar.multiselect("Motoristas", motoristas)
+    if todos_motoristas:
+        sel_motorista = motoristas
+    else:
+        sel_motorista = st.sidebar.multiselect("Motoristas", motoristas)
 
+    # --- FILTRO PLACAS ---
     placas = sorted(df["Placa do Caminhão"].dropna().unique())
     todas_placas = st.sidebar.checkbox("Selecionar todas as placas", value=True)
-    sel_placa = placas if todas_placas else st.sidebar.multiselect("Placas", placas)
+    if todas_placas:
+        sel_placa = placas
+    else:
+        sel_placa = st.sidebar.multiselect("Placas", placas)
 
-    df = df[df["Motorista"].isin(sel_motorista)]
-    df = df[df["Placa do Caminhão"].isin(sel_placa)]
+    # Aplicar filtro
+    if todos_motoristas:
+        df = df[df["Motorista"].isin(motoristas)]
+    else:
+        df = df[df["Motorista"].isin(sel_motorista)]
+
+    if todas_placas:
+        df = df[df["Placa do Caminhão"].isin(placas)]
+    else:
+        df = df[df["Placa do Caminhão"].isin(sel_placa)]
 
     status_opcoes = ["Todos", "Aberto / Em andamento", "Concluído"]
     status_sel = st.sidebar.selectbox("Status da NC", status_opcoes)
@@ -141,16 +156,21 @@ def main():
 
     cols_excluir = obrigatorias + ["Data", "Km atual"]
     itens = [col for col in df.columns if col not in cols_excluir]
+
     df_itens = df[itens].fillna("").astype(str).applymap(lambda x: x.strip().lower())
     df["Reincidencias"] = df_itens.apply(lambda row: sum(v != "ok" and v != "" for v in row), axis=1)
 
+    # Classificação dos veículos
     df_veic_nc = df.groupby("Placa do Caminhão").agg(
         Total_NC=pd.NamedAgg(column="Reincidencias", aggfunc="sum"),
         Status_Aberto=pd.NamedAgg(column=col_status, aggfunc=lambda s: any(x in ["aberto", "em andamento"] for x in s))
     ).reset_index()
     df_veic_nc["Classificação"] = df_veic_nc.apply(lambda row: classificar_veiculo(row["Total_NC"], "aberto" if row["Status_Aberto"] else "concluído"), axis=1)
 
+    # Mapeamento categorias para itens
     categorias = [mapear_categoria(item) for item in itens]
+
+    # Montar df para análise por categoria
     df_cat = pd.DataFrame({
         "Item": itens,
         "Categoria": categorias,
@@ -159,12 +179,14 @@ def main():
     df_cat = df_cat[df_cat["NCs"] > 0]
     df_cat_grouped = df_cat.groupby("Categoria").sum().reset_index().sort_values("NCs", ascending=False)
 
+    # Aba: Criar tabs
     aba1, aba2, aba3, aba4, aba5 = st.tabs([
         "📊 Visão Geral", "🛠️ Manutenção", "📌 Itens Críticos", "📝 Observações", "📸 Fotos"
     ])
 
     with aba1:
         st.markdown("### 🔢 Indicadores")
+
         resumo = df.groupby("Placa do Caminhão")["Reincidencias"].sum().reset_index()
         veic_top = resumo.loc[resumo["Reincidencias"].idxmax(), "Placa do Caminhão"] if not resumo.empty else "N/A"
         total_nc = resumo["Reincidencias"].max() if not resumo.empty else 0
@@ -204,20 +226,24 @@ def main():
 
         st.markdown("### 📅 Tendência Temporal de NCs")
         agrupamento = st.selectbox("Agrupar por", ["Diário", "Semanal", "Mensal"], index=2)
+
         if agrupamento == "Diário":
             df_tend = df.groupby(df["Carimbo de data/hora"].dt.date).agg(Checklists_Com_NC=("Reincidencias", lambda x: (x > 0).sum())).reset_index()
             df_tend.rename(columns={"Carimbo de data/hora": "Data"}, inplace=True)
+            xaxis_title = "Data"
         elif agrupamento == "Semanal":
             df_tend = df.groupby(df["Carimbo de data/hora"].dt.to_period("W")).agg(Checklists_Com_NC=("Reincidencias", lambda x: (x > 0).sum())).reset_index()
             df_tend["Carimbo de data/hora"] = df_tend["Carimbo de data/hora"].dt.start_time
             df_tend.rename(columns={"Carimbo de data/hora": "Data"}, inplace=True)
-        else:
+            xaxis_title = "Semana"
+        else:  # Mensal
             df_tend = df.groupby(df["Carimbo de data/hora"].dt.to_period("M")).agg(Checklists_Com_NC=("Reincidencias", lambda x: (x > 0).sum())).reset_index()
             df_tend["Carimbo de data/hora"] = df_tend["Carimbo de data/hora"].dt.start_time
             df_tend.rename(columns={"Carimbo de data/hora": "Data"}, inplace=True)
+            xaxis_title = "Mês"
 
         fig_tend = px.line(df_tend, x="Data", y="Checklists_Com_NC", markers=True,
-                           labels={"Checklists_Com_NC": "Checklists com NC", "Data": agrupamento},
+                           labels={"Checklists_Com_NC": "Checklists com NC", "Data": xaxis_title},
                            title="Tendência de Checklists com Não Conformidades")
         st.plotly_chart(fig_tend, use_container_width=True)
 
